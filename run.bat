@@ -1,0 +1,6 @@
+@echo off
+echo Stopping existing instances...
+powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*klipper_tray.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+echo Starting new instance...
+start /B pyw klipper_tray.py
+exit

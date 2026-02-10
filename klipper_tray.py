@@ -9,6 +9,8 @@ import pystray
 import requests
 import datetime
 
+__version__ = "1.0.0"
+
 import os
 import tkinter as tk
 from tkinter import simpledialog, messagebox

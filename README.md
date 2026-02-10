@@ -61,3 +61,6 @@ Wait for the prompt on first run, or create the file manually using `config.exam
 
 ## License
 MIT
+
+## Disclaimer
+This software was written with the assistance of an AI coding assistant.

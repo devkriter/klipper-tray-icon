@@ -1,7 +1,5 @@
 # Klipper Tray Icon
 
-![Klipper](https://raw.githubusercontent.com/Klipper3d/klipper/master/docs/img/klipper-logo.png)
-
 A lightweight Windows system tray application that visualizes the status of your 3D print from a Klipper/Moonraker/Mainsail setup.
 The icon updates dynamically to show a circular progress bar corresponding to the print progress.
 

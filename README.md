@@ -50,7 +50,7 @@ To build the `.exe` yourself:
 
 ## Configuration
 The application stores its configuration in a `config.json` file in the same directory as the executable.
-Wait for the prompt on first run, or create the file manually:
+Wait for the prompt on first run, or create the file manually using `config.example.json` as a template:
 
 ```json
 {

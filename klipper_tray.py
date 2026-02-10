@@ -9,8 +9,19 @@ import pystray
 import requests
 import datetime
 
+import os
+import tkinter as tk
+from tkinter import simpledialog, messagebox
+
 # Configuration
-CONFIG_FILE = "config.json"
+if getattr(sys, 'frozen', False):
+    # If run as an exe, config is next to the executable
+    application_path = os.path.dirname(sys.executable)
+else:
+    # If run as a script, config is in the script directory
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(application_path, "config.json")
 DEFAULT_CONFIG = {
     "moonraker_url": "http://mainsail.local",
     "update_interval_seconds": 2
@@ -21,7 +32,28 @@ def load_config():
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        return DEFAULT_CONFIG
+        # Prompt user if config doesn't exist
+        root = tk.Tk()
+        root.withdraw() # Hide main window
+        
+        url = simpledialog.askstring(
+            title="Configuration", 
+            prompt="Enter your Moonraker/Mainsail URL:\n(e.g., http://mainsail.local or http://192.168.1.100)",
+            initialvalue="http://mainsail.local"
+        )
+        
+        if url:
+            new_config = DEFAULT_CONFIG.copy()
+            new_config["moonraker_url"] = url
+            try:
+                with open(CONFIG_FILE, "w") as f:
+                    json.dump(new_config, f, indent=4)
+                return new_config
+            except Exception as e:
+                 messagebox.showerror("Error", f"Failed to save config: {e}")
+                 sys.exit(1)
+        else:
+            sys.exit(0) # User cancelled
 
 config = load_config()
 MOONRAKER_URL = config.get("moonraker_url", "http://mainsail.local").rstrip("/")

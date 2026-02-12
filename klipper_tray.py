@@ -9,7 +9,7 @@ import pystray
 import requests
 import datetime
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import os
 import tkinter as tk
@@ -60,12 +60,14 @@ def load_config():
 config = load_config()
 MOONRAKER_URL = config.get("moonraker_url", "http://mainsail.local").rstrip("/")
 
-# Global state
-current_state = "unknown"
-current_progress = 0.0
+# Cache for print metadata
+last_filename = None
+cached_estimated_time = None
 
 def get_printer_status():
     """Fetch status from Moonraker API."""
+    global last_filename, cached_estimated_time
+    
     try:
         # Query print_stats, display_status, virtual_sdcard
         url = f"{MOONRAKER_URL}/printer/objects/query?print_stats&display_status&virtual_sdcard"
@@ -87,17 +89,54 @@ def get_printer_status():
         filename = print_stats.get("filename", "")
         print_duration = print_stats.get("print_duration", 0.0)
         
+        # Metadata handling for accurate ETA
+        if filename != last_filename:
+            last_filename = filename
+            cached_estimated_time = None
+            if filename:
+                try:
+                    # Fetch metadata
+                    meta_url = f"{MOONRAKER_URL}/server/files/metadata?filename={filename}"
+                    meta_resp = requests.get(meta_url, timeout=2)
+                    if meta_resp.ok:
+                        meta_data = meta_resp.json()
+                        cached_estimated_time = meta_data.get("result", {}).get("estimated_time")
+                except Exception as e:
+                    print(f"Metadata error: {e}")
+
         # Calculate time left
         time_left = 0
-        if state == "printing" and progress > 0.01:
-             total_duration = print_duration / progress
-             time_left = total_duration - print_duration
+        eta_source = "Calc"
+        
+        if state == "printing":
+            # Strategy 1: Slicer Estimate (Best)
+            if cached_estimated_time and cached_estimated_time > 0:
+                time_left = max(0, cached_estimated_time - print_duration)
+                eta_source = "Slicer"
+                
+                # If slicer estimate is wildly wrong (e.g. time_left < 0 or we are at 10% but time left is 0),
+                # fallback to calculation?
+                # Usually slicer estimate is 'total time'.
+                # Let's trust it unless it's depleted.
+                if time_left == 0 and progress < 0.99:
+                     # Fallback if slicer says 0 but we aren't done
+                     pass 
+                else:
+                     # Valid slicer estimate
+                     pass
+            
+            # Strategy 2: Simple Calculation (Fallback)
+            if (time_left == 0 or eta_source == "Calc") and progress > 0.01:
+                 total_duration = print_duration / progress
+                 time_left = total_duration - print_duration
+                 eta_source = "Calc"
 
         return {
             "state": state,
             "progress": progress,
             "filename": filename,
-            "time_left": time_left
+            "time_left": time_left,
+            "eta_source": eta_source
         }
     except Exception as e:
         # print(f"Error fetching status: {e}")
@@ -155,6 +194,9 @@ def format_time_delta(seconds):
         return f"{h}h {m}m"
     return f"{m}m"
 
+# Global state
+current_state = "unknown"
+current_progress = 0.0
 shutdown_event = threading.Event()
 
 def update_loop(icon):
@@ -174,6 +216,7 @@ def update_loop(icon):
             pct = int(progress * 100)
             filename = data.get("filename", "Unknown")
             time_left = data.get("time_left", 0)
+            eta_source = data.get("eta_source", "Calc")
             
             # ETA
             eta_dt = datetime.datetime.now() + datetime.timedelta(seconds=time_left)
@@ -184,7 +227,8 @@ def update_loop(icon):
             if len(filename) > 25:
                 filename = "..." + filename[-22:]
             
-            tooltip = f"Printing: {pct}%\nLeft: {left_str} (ETA: {eta_str})\n{filename}"
+            source_label = "Slicer" if eta_source == "Slicer" else "Calc"
+            tooltip = f"Printing: {pct}%\nLeft: {left_str} ({source_label})\nETA: {eta_str}\n{filename}"
         elif state == "error":
              tooltip = "Connection Error / Printer Error"
         else:

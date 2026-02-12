@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0] - 2026-02-12
+### Improved
+- ETA Calculation: Now fetches file metadata from Moonraker to use the **Slicer Estimated Time** if available, providing much more accurate time remaining estimates than simple linear projection.
+- Tooltip: Added source indicator for ETA (e.g., "Slicer" vs "Calc").
+
 ## [1.1.0] - 2026-02-10
 ### Added
 - Webcam Streaming: Left-click (or 'Show Webcam' in menu) to view a live feed.

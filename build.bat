@@ -1,5 +1,5 @@
 @echo off
-set VERSION=1.1.0
+set VERSION=1.2.0
 echo Installing PyInstaller...
 py -m pip install pyinstaller
 

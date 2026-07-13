@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0] - 2026-07-13
+### Added
+- Bambu Lab printer support via local LAN Only Mode MQTT (no cloud account required). Select
+  printer type on first run and enter the printer's IP, serial number, and access code.
+- Introduced a printer backend abstraction (`backends.py`) so Klipper/Moonraker and Bambu Lab
+  share the same tray icon, tooltip, and status logic.
+### Notes
+- Webcam support remains Klipper/Moonraker only for this release.
+
 ## [1.2.0] - 2026-02-12
 ### Improved
 - ETA Calculation: Now fetches file metadata from Moonraker to use the **Slicer Estimated Time** if available, providing much more accurate time remaining estimates than simple linear projection.

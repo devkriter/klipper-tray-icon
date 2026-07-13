@@ -9,7 +9,9 @@ import pystray
 import requests
 import datetime
 
-__version__ = "1.2.0"
+import backends
+
+__version__ = "1.3.0"
 
 import os
 import tkinter as tk
@@ -25,9 +27,53 @@ else:
 
 CONFIG_FILE = os.path.join(application_path, "config.json")
 DEFAULT_CONFIG = {
+    "printer_type": "klipper",
     "moonraker_url": "http://mainsail.local",
     "update_interval_seconds": 2
 }
+
+def _prompt_klipper_config():
+    url = simpledialog.askstring(
+        title="Configuration",
+        prompt="Enter your Moonraker/Mainsail URL:\n(e.g., http://mainsail.local or http://192.168.1.100)",
+        initialvalue="http://mainsail.local"
+    )
+    if not url:
+        sys.exit(0)  # User cancelled
+
+    new_config = DEFAULT_CONFIG.copy()
+    new_config["printer_type"] = "klipper"
+    new_config["moonraker_url"] = url
+    return new_config
+
+def _prompt_bambu_config():
+    ip = simpledialog.askstring(
+        title="Bambu Printer IP",
+        prompt="Enter your Bambu printer's local IP address:\n(Settings > WLAN on the printer)"
+    )
+    if not ip:
+        sys.exit(0)
+
+    serial = simpledialog.askstring(
+        title="Bambu Serial Number",
+        prompt="Enter your printer's Serial Number:\n(Settings > WLAN, or printed on the printer)"
+    )
+    if not serial:
+        sys.exit(0)
+
+    access_code = simpledialog.askstring(
+        title="Bambu Access Code",
+        prompt="Enter your printer's Access Code:\n(Settings > WLAN, requires 'LAN Only Mode' enabled)"
+    )
+    if not access_code:
+        sys.exit(0)
+
+    new_config = DEFAULT_CONFIG.copy()
+    new_config["printer_type"] = "bambu"
+    new_config["bambu_ip"] = ip
+    new_config["bambu_serial"] = serial
+    new_config["bambu_access_code"] = access_code
+    return new_config
 
 def load_config():
     try:
@@ -37,110 +83,26 @@ def load_config():
         # Prompt user if config doesn't exist
         root = tk.Tk()
         root.withdraw() # Hide main window
-        
-        url = simpledialog.askstring(
-            title="Configuration", 
-            prompt="Enter your Moonraker/Mainsail URL:\n(e.g., http://mainsail.local or http://192.168.1.100)",
-            initialvalue="http://mainsail.local"
+
+        is_klipper = messagebox.askyesno(
+            "Printer Type",
+            "What type of printer are you connecting to?\n\n"
+            "Yes = Klipper / Moonraker (Mainsail/Fluidd)\n"
+            "No = Bambu Lab (LAN Only Mode)"
         )
-        
-        if url:
-            new_config = DEFAULT_CONFIG.copy()
-            new_config["moonraker_url"] = url
-            try:
-                with open(CONFIG_FILE, "w") as f:
-                    json.dump(new_config, f, indent=4)
-                return new_config
-            except Exception as e:
-                 messagebox.showerror("Error", f"Failed to save config: {e}")
-                 sys.exit(1)
-        else:
-            sys.exit(0) # User cancelled
+
+        new_config = _prompt_klipper_config() if is_klipper else _prompt_bambu_config()
+
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(new_config, f, indent=4)
+            return new_config
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save config: {e}")
+            sys.exit(1)
 
 config = load_config()
-MOONRAKER_URL = config.get("moonraker_url", "http://mainsail.local").rstrip("/")
-
-# Cache for print metadata
-last_filename = None
-cached_estimated_time = None
-
-def get_printer_status():
-    """Fetch status from Moonraker API."""
-    global last_filename, cached_estimated_time
-    
-    try:
-        # Query print_stats, display_status, virtual_sdcard
-        url = f"{MOONRAKER_URL}/printer/objects/query?print_stats&display_status&virtual_sdcard"
-        response = requests.get(url, timeout=2)
-        response.raise_for_status()
-        data = response.json()
-        
-        status = data.get("result", {}).get("status", {})
-        print_stats = status.get("print_stats", {})
-        display_status = status.get("display_status", {})
-        virtual_sdcard = status.get("virtual_sdcard", {})
-
-        state = print_stats.get("state", "standby")
-        # Prefer virtual_sdcard progress as it is often more accurate
-        progress = virtual_sdcard.get("progress", 0.0)
-        if progress == 0:
-            progress = display_status.get("progress", 0.0)
-            
-        filename = print_stats.get("filename", "")
-        print_duration = print_stats.get("print_duration", 0.0)
-        
-        # Metadata handling for accurate ETA
-        if filename != last_filename:
-            last_filename = filename
-            cached_estimated_time = None
-            if filename:
-                try:
-                    # Fetch metadata
-                    meta_url = f"{MOONRAKER_URL}/server/files/metadata?filename={filename}"
-                    meta_resp = requests.get(meta_url, timeout=2)
-                    if meta_resp.ok:
-                        meta_data = meta_resp.json()
-                        cached_estimated_time = meta_data.get("result", {}).get("estimated_time")
-                except Exception as e:
-                    print(f"Metadata error: {e}")
-
-        # Calculate time left
-        time_left = 0
-        eta_source = "Calc"
-        
-        if state == "printing":
-            # Strategy 1: Slicer Estimate (Best)
-            if cached_estimated_time and cached_estimated_time > 0:
-                time_left = max(0, cached_estimated_time - print_duration)
-                eta_source = "Slicer"
-                
-                # If slicer estimate is wildly wrong (e.g. time_left < 0 or we are at 10% but time left is 0),
-                # fallback to calculation?
-                # Usually slicer estimate is 'total time'.
-                # Let's trust it unless it's depleted.
-                if time_left == 0 and progress < 0.99:
-                     # Fallback if slicer says 0 but we aren't done
-                     pass 
-                else:
-                     # Valid slicer estimate
-                     pass
-            
-            # Strategy 2: Simple Calculation (Fallback)
-            if (time_left == 0 or eta_source == "Calc") and progress > 0.01:
-                 total_duration = print_duration / progress
-                 time_left = total_duration - print_duration
-                 eta_source = "Calc"
-
-        return {
-            "state": state,
-            "progress": progress,
-            "filename": filename,
-            "time_left": time_left,
-            "eta_source": eta_source
-        }
-    except Exception as e:
-        # print(f"Error fetching status: {e}")
-        return {"state": "error", "progress": 0.0, "filename": "", "time_left": 0}
+backend = backends.create_backend(config)
 
 def create_tray_icon(state, progress):
     """Generate a circular progress icon."""
@@ -199,25 +161,25 @@ current_state = "unknown"
 current_progress = 0.0
 shutdown_event = threading.Event()
 
-def update_loop(icon):
+def update_loop(icon, backend):
     """Background thread logic to update icon."""
     icon.visible = True
     global current_state, current_progress
-    
+
     import datetime
 
     while icon.visible and not shutdown_event.is_set():
-        data = get_printer_status()
-        state = data.get("state", "unknown")
-        progress = data.get("progress", 0.0)
-        
+        data = backend.get_status()
+        state = data.state
+        progress = data.progress
+
         # Determine tooltip text
         if state == "printing":
             pct = int(progress * 100)
-            filename = data.get("filename", "Unknown")
-            time_left = data.get("time_left", 0)
-            eta_source = data.get("eta_source", "Calc")
-            
+            filename = data.filename or "Unknown"
+            time_left = data.time_left
+            eta_source = data.eta_source
+
             # ETA
             eta_dt = datetime.datetime.now() + datetime.timedelta(seconds=time_left)
             eta_str = eta_dt.strftime("%H:%M")
@@ -247,12 +209,14 @@ def update_loop(icon):
             break
 
 def on_open_browser(icon, item):
-    webbrowser.open(MOONRAKER_URL)
+    if backend.dashboard_url:
+        webbrowser.open(backend.dashboard_url)
 
 def on_exit(icon, item):
     shutdown_event.set()
     icon.visible = False
     icon.stop()
+    backend.stop()
     os._exit(0)
 
 import io
@@ -262,37 +226,7 @@ import subprocess
 
 # Configuration handled above...
 
-# MJPEG Streaming Logic
-def get_webcam_url():
-    """Discover webcam URL from Moonraker."""
-    try:
-        url = f"{MOONRAKER_URL}/server/webcams/list"
-        response = requests.get(url, timeout=2)
-        response.raise_for_status()
-        data = response.json()
-        webcams = data.get("result", {}).get("webcams", [])
-        
-        if not webcams:
-            # Fallback default
-            return f"{MOONRAKER_URL}/webcam/?action=stream"
-            
-        # Pick first enabled MJPEG stream
-        for cam in webcams:
-            if cam.get("enabled", True) and cam.get("service") in ["mjpegstreamer", "mjpegstreamer-adaptive", "ipstream"]:
-                 stream_path = cam.get("stream_url", "")
-                 if stream_path.startswith("http"):
-                     return stream_path
-                 elif stream_path.startswith("/"):
-                     return f"{MOONRAKER_URL}{stream_path}"
-                 return f"{MOONRAKER_URL}/{stream_path}"
-        
-        # Fallback if list exists but no suitable match found
-        return f"{MOONRAKER_URL}/webcam/?action=stream"
-
-    except Exception as e:
-        print(f"Error fetching webcam list: {e}")
-        return f"{MOONRAKER_URL}/webcam/?action=stream"
-
+# MJPEG Streaming Logic (Klipper/Moonraker only)
 def run_webcam_window(x=None, y=None):
     """Run the webcam viewer in a Tkinter window."""
     root = tk.Tk()
@@ -348,7 +282,7 @@ def run_webcam_window(x=None, y=None):
                           activebackground="#cc0000", activeforeground="white")
     close_btn.place(x=width-30, y=1, width=28, height=24)
 
-    stream_url = get_webcam_url()
+    stream_url = backend.get_webcam_url()
     # print(f"Streaming from: {stream_url}")
     
     # Threaded frame fetcher
@@ -444,6 +378,10 @@ def on_show_webcam(icon, item):
 def main():
     # Argument handling
     if len(sys.argv) > 1 and sys.argv[1] == "--webcam":
+        if not backend.supports_webcam:
+            print("Webcam not supported for this printer type")
+            sys.exit(1)
+
         x, y = None, None
         if len(sys.argv) >= 4:
             try:
@@ -452,28 +390,32 @@ def main():
             except ValueError: pass
 
         try:
-            from PIL import ImageTk 
+            from PIL import ImageTk
         except ImportError:
             print("PIL.ImageTk missing")
             sys.exit(1)
-            
+
         run_webcam_window(x, y)
         return
 
+    backend.start()
+
     # Initial state
     initial_image = create_tray_icon("standby", 0.0)
-    
-    # Context Menu
-    menu = pystray.Menu(
-        pystray.MenuItem("Show Webcam", on_show_webcam, default=True),
-        pystray.MenuItem("Open Mainsail", on_open_browser),
-        pystray.MenuItem("Exit", on_exit)
-    )
-    
+
+    # Context Menu (built based on what the active backend supports)
+    items = []
+    if backend.supports_webcam:
+        items.append(pystray.MenuItem("Show Webcam", on_show_webcam, default=True))
+    if backend.dashboard_url:
+        items.append(pystray.MenuItem("Open Mainsail", on_open_browser))
+    items.append(pystray.MenuItem("Exit", on_exit))
+    menu = pystray.Menu(*items)
+
     icon = pystray.Icon("KlipperTray", initial_image, "Connecting...", menu)
-    
+
     # Pass update_loop as the setup function
-    icon.run(setup=update_loop)
+    icon.run(setup=lambda ic: update_loop(ic, backend))
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.0] - 2026-07-13
+### Added
+- Bambu Lab camera support for X1/X1C/X1E/X2D/P2S/H2D/H2C/H2S via a bundled
+  [go2rtc](https://github.com/AlexxIT/go2rtc) helper, which decodes the printer's RTSPS camera
+  stream locally and re-exposes it as MJPEG for the existing webcam viewer. Uses the same IP and
+  Access Code already configured for status polling.
+### Notes
+- P1P/P1S/A1/A1 mini use a different local camera protocol and are not yet supported (shows
+  "Camera unavailable").
+
 ## [1.3.0] - 2026-07-13
 ### Added
 - Bambu Lab printer support via local LAN Only Mode MQTT (no cloud account required). Select

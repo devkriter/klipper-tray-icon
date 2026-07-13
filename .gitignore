@@ -5,3 +5,6 @@ build/
 __pycache__/
 *.pyc
 Release/
+go2rtc.exe
+go2rtc_win64.zip
+go2rtc_cache/

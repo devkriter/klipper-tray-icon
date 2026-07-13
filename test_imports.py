@@ -4,6 +4,7 @@ try:
     import requests
     import paho.mqtt.client
     import backends
+    import camera_bridge
     print("Imports successful.")
 except ImportError as e:
     print(f"Import failed: {e}")
@@ -31,5 +32,17 @@ assert status.filename == "Benchy", status.filename
 assert status.eta_source == "Slicer", status.eta_source
 
 print("Bambu report parsing OK.")
+
+# Sanity-check the go2rtc camera bridge's pure helper functions (no network,
+# no spawning go2rtc - just string building).
+rtsps_url = camera_bridge.build_rtsps_url("192.168.1.50", "12345678")
+assert rtsps_url == "rtsps://bblp:12345678@192.168.1.50:322/streaming/live/1", rtsps_url
+
+config_text = camera_bridge.build_go2rtc_config(23456, "bambu", rtsps_url)
+assert '"127.0.0.1:23456"' in config_text, config_text
+assert rtsps_url in config_text, config_text
+assert "streams:" in config_text and "bambu:" in config_text, config_text
+
+print("go2rtc camera bridge helpers OK.")
 print("Test complete.")
 exit(0)

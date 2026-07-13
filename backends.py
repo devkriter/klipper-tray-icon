@@ -9,6 +9,30 @@ from dataclasses import dataclass
 import requests
 import paho.mqtt.client as mqtt
 
+import camera_bridge
+
+
+def _iter_http_mjpeg_frames(url, stop_event):
+    """Consume a plain HTTP MJPEG stream, yielding each JPEG frame as bytes."""
+    try:
+        with requests.get(url, stream=True, timeout=5) as r:
+            r.raise_for_status()
+            bytes_buffer = b''
+            for chunk in r.iter_content(chunk_size=4096):
+                if stop_event.is_set():
+                    return
+                bytes_buffer += chunk
+                while True:
+                    a = bytes_buffer.find(b'\xff\xd8')
+                    b_idx = bytes_buffer.find(b'\xff\xd9')
+                    if a != -1 and b_idx != -1:
+                        yield bytes_buffer[a:b_idx + 2]
+                        bytes_buffer = bytes_buffer[b_idx + 2:]
+                    else:
+                        break
+    except Exception:
+        return
+
 
 @dataclass
 class PrinterStatus:
@@ -31,6 +55,9 @@ class PrinterBackend:
         pass
 
     def get_status(self) -> PrinterStatus:
+        raise NotImplementedError
+
+    def iter_webcam_frames(self, stop_event):
         raise NotImplementedError
 
 
@@ -137,6 +164,9 @@ class MoonrakerBackend(PrinterBackend):
             print(f"Error fetching webcam list: {e}")
             return f"{self.moonraker_url}/webcam/?action=stream"
 
+    def iter_webcam_frames(self, stop_event):
+        yield from _iter_http_mjpeg_frames(self.get_webcam_url(), stop_event)
+
 
 # Bambu gcode_state -> this app's common state vocabulary
 _BAMBU_STATE_MAP = {
@@ -184,13 +214,14 @@ def parse_bambu_report(payload: dict) -> PrinterStatus:
 
 
 class BambuBackend(PrinterBackend):
-    supports_webcam = False
+    supports_webcam = True
     dashboard_url = None
 
-    def __init__(self, ip, serial, access_code):
+    def __init__(self, ip, serial, access_code, app_dir):
         self.ip = ip
         self.serial = serial
         self.access_code = access_code
+        self.app_dir = app_dir
 
         self._lock = threading.Lock()
         self._client = None
@@ -198,6 +229,7 @@ class BambuBackend(PrinterBackend):
         self._connected_at = None
         self._latest_report = None
         self._last_message_time = None
+        self._camera_bridge = None
 
     def _on_connect(self, client, userdata, flags, rc):
         with self._lock:
@@ -246,6 +278,12 @@ class BambuBackend(PrinterBackend):
             except Exception:
                 pass
 
+        with self._lock:
+            bridge = self._camera_bridge
+            self._camera_bridge = None
+        if bridge is not None:
+            bridge.stop()
+
     def get_status(self) -> PrinterStatus:
         with self._lock:
             connected = self._connected
@@ -262,13 +300,29 @@ class BambuBackend(PrinterBackend):
 
         return parse_bambu_report(report)
 
+    def iter_webcam_frames(self, stop_event):
+        bridge = camera_bridge.Go2RtcCameraBridge(self.ip, self.access_code, self.app_dir)
+        with self._lock:
+            self._camera_bridge = bridge
+        try:
+            mjpeg_url = bridge.start()
+            if mjpeg_url is None or stop_event.is_set():
+                return
+            yield from _iter_http_mjpeg_frames(mjpeg_url, stop_event)
+        finally:
+            bridge.stop()
+            with self._lock:
+                if self._camera_bridge is bridge:
+                    self._camera_bridge = None
 
-def create_backend(config: dict) -> PrinterBackend:
+
+def create_backend(config: dict, app_dir: str) -> PrinterBackend:
     printer_type = config.get("printer_type", "klipper")
     if printer_type == "bambu":
         return BambuBackend(
             ip=config.get("bambu_ip", ""),
             serial=config.get("bambu_serial", ""),
             access_code=config.get("bambu_access_code", ""),
+            app_dir=app_dir,
         )
     return MoonrakerBackend(config.get("moonraker_url", "http://mainsail.local"))

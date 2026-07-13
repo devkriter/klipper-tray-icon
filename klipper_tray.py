@@ -11,7 +11,7 @@ import datetime
 
 import backends
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 import os
 import tkinter as tk
@@ -102,7 +102,7 @@ def load_config():
             sys.exit(1)
 
 config = load_config()
-backend = backends.create_backend(config)
+backend = backends.create_backend(config, application_path)
 
 def create_tray_icon(state, progress):
     """Generate a circular progress icon."""
@@ -276,77 +276,84 @@ def run_webcam_window(x=None, y=None):
     lbl_video = tk.Label(content_frame, bg="black")
     lbl_video.pack(fill=tk.BOTH, expand=True)
     
+    # Threaded frame fetcher
+    stop_event = threading.Event()
+
+    def close_window():
+        # stop_event lets the stream thread's own cleanup run first if it's
+        # quick, but backend.stop() is the real guarantee - it force-stops
+        # any camera bridge process (e.g. go2rtc) this window started, since
+        # os._exit() below won't run the stream thread's "finally" cleanup.
+        stop_event.set()
+        try:
+            backend.stop()
+        except Exception:
+            pass
+        os._exit(0)
+
     # Add a close button overlay or behavior
-    close_btn = tk.Button(root, text="×", command=lambda: os._exit(0), 
+    close_btn = tk.Button(root, text="×", command=close_window,
                           bg="#202020", fg="white", bd=0, font=("Arial", 12),
                           activebackground="#cc0000", activeforeground="white")
     close_btn.place(x=width-30, y=1, width=28, height=24)
 
-    stream_url = backend.get_webcam_url()
-    # print(f"Streaming from: {stream_url}")
-    
-    # Threaded frame fetcher
-    stop_event = threading.Event()
-    
+    # Show something immediately - first Bambu use may include a one-time
+    # go2rtc download before any frame arrives.
+    lbl_video.config(text="Connecting...", fg="white")
+
     def stream_loop():
+        got_frame = False
         try:
-            with requests.get(stream_url, stream=True, timeout=5) as r:
-                r.raise_for_status()
-                bytes_buffer = b''
-                for chunk in r.iter_content(chunk_size=4096):
-                    if stop_event.is_set(): break
-                    bytes_buffer += chunk
-                    
-                    while True:
-                        a = bytes_buffer.find(b'\xff\xd8')
-                        b = bytes_buffer.find(b'\xff\xd9')
-                        if a != -1 and b != -1:
-                            jpg = bytes_buffer[a:b+2]
-                            bytes_buffer = bytes_buffer[b+2:]
-                            try:
-                                # Decode and resize
-                                img = Image.open(io.BytesIO(jpg))
-                                # Resize to fit window
-                                # win_w = root.winfo_width() # May fail if not mapped?
-                                # win_h = root.winfo_height()
-                                
-                                # Use fixed size for reliability or just img size?
-                                # Let's scale to fit the frame
-                                img.thumbnail((width, height))
-                                
-                                # Use standard PIL.ImageTk
-                                from PIL import ImageTk
-                                tk_img = ImageTk.PhotoImage(img)
-                                
-                                def update_ui(image_ref):
-                                    try:
-                                        if root.winfo_exists():
-                                            lbl_video.config(image=image_ref)
-                                            lbl_video.image = image_ref # Keep reference
-                                    except: pass
-                                
-                                root.after(0, update_ui, tk_img)
-                            except Exception as e:
-                                pass # Frame error
-                        else:
-                            break # Wait for more data
+            for jpg in backend.iter_webcam_frames(stop_event):
+                if stop_event.is_set():
+                    break
+                got_frame = True
+                try:
+                    # Decode and resize
+                    img = Image.open(io.BytesIO(jpg))
+                    # Scale to fit the frame
+                    img.thumbnail((width, height))
+
+                    # Use standard PIL.ImageTk
+                    from PIL import ImageTk
+                    tk_img = ImageTk.PhotoImage(img)
+
+                    def update_ui(image_ref):
+                        try:
+                            if root.winfo_exists():
+                                lbl_video.config(image=image_ref, text="")
+                                lbl_video.image = image_ref # Keep reference
+                        except: pass
+
+                    root.after(0, update_ui, tk_img)
+                except Exception as e:
+                    pass # Frame error
         except Exception as e:
             pass
             # print(f"Stream error: {e}")
-    
+
+        if not got_frame and not stop_event.is_set():
+            def show_unavailable():
+                try:
+                    if root.winfo_exists():
+                        lbl_video.config(text="Camera unavailable", fg="white")
+                except Exception:
+                    pass
+            root.after(0, show_unavailable)
+
     t = threading.Thread(target=stream_loop, daemon=True)
     t.start()
     
     # Close on Escape or click outside?
-    root.bind("<Escape>", lambda e: os._exit(0))
-    
+    root.bind("<Escape>", lambda e: close_window())
+
     # For click-away close, we need a focus out handler
     def on_focus_out(event):
         # Small delay to allow focus transfer to check
         # This can be annoying if it closes when you click the window itself (if focus handling is weird)
         # But for a popup, losing focus normally means close.
         if root.focus_displayof() is None:
-             os._exit(0)
+             close_window()
              
     root.bind("<FocusOut>", on_focus_out)
     root.focus_force() # Grab focus initially

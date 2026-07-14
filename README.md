@@ -40,15 +40,17 @@ Limitations:
 
 - **X1 / X1C / X1E / X2D / P2S / H2D / H2C / H2S**: supported. These printers expose their
   camera as an encrypted RTSPS stream; this app bundles [go2rtc](https://github.com/AlexxIT/go2rtc)
-  (MIT licensed) to decode it locally and re-display it as a live feed, using the same IP and
-  Access Code entered during setup. No extra configuration needed. go2rtc is only started while
-  the "Show Webcam" popup is open, since the printer only allows **one** camera client at a
-  time — close Bambu Studio/Bambu Handy first if the feed shows "Camera unavailable".
+  (MIT licensed) plus a static [ffmpeg](https://ffmpeg.org) build (LGPL) to decode it locally and
+  re-display it as a live feed, using the same IP and Access Code entered during setup — no extra
+  configuration needed. Both are only started while the "Show Webcam" popup is open, since the
+  printer only allows **one** camera client at a time — close Bambu Studio/Bambu Handy first if
+  the feed shows "Camera unavailable".
 - **P1P / P1S / A1 / A1 mini**: not yet supported (these models use a different local camera
   protocol). "Show Webcam" will show "Camera unavailable" on these printers.
-- When run from source, the first "Show Webcam" click downloads and caches `go2rtc.exe` (~7MB)
-  into a `go2rtc_cache` folder next to `config.json`. The packaged `.exe` build already has it
-  bundled in, so no download happens for end users running the release build.
+- When run from source, the first "Show Webcam" click downloads and caches `go2rtc.exe` (~19MB)
+  and `ffmpeg.exe` (~110MB) into a `go2rtc_cache` folder next to `config.json`. The packaged
+  `.exe` build already has both bundled in, so no download happens for end users running the
+  release build.
 
 ## Installation
 
@@ -108,8 +110,10 @@ For Bambu Lab, LAN Only Mode (see `config.example.bambu.json`):
 ## License
 MIT
 
-This project bundles [go2rtc](https://github.com/AlexxIT/go2rtc) (MIT licensed) to support
-Bambu Lab camera streaming.
+This project bundles [go2rtc](https://github.com/AlexxIT/go2rtc) (MIT licensed) and a static
+[ffmpeg](https://ffmpeg.org) build (LGPL 2.1+, via [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds))
+to support Bambu Lab RTSPS camera streaming. Neither is linked into this project's own code —
+both are invoked as separate local subprocesses.
 
 ## Disclaimer
 This software was written with the assistance of an AI coding assistant.

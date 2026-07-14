@@ -11,7 +11,7 @@ import datetime
 
 import backends
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 import os
 import tkinter as tk

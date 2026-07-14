@@ -8,3 +8,6 @@ Release/
 go2rtc.exe
 go2rtc_win64.zip
 go2rtc_cache/
+ffmpeg.exe
+ffmpeg_build.zip
+ffmpeg_extract/

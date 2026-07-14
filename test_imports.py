@@ -38,10 +38,13 @@ print("Bambu report parsing OK.")
 rtsps_url = camera_bridge.build_rtsps_url("192.168.1.50", "12345678")
 assert rtsps_url == "rtsps://bblp:12345678@192.168.1.50:322/streaming/live/1", rtsps_url
 
-config_text = camera_bridge.build_go2rtc_config(23456, "bambu", rtsps_url)
+config_text = camera_bridge.build_go2rtc_config(23456, 23457, "bambu", rtsps_url, ffmpeg_bin=r"C:\short\ffmpeg.exe")
 assert '"127.0.0.1:23456"' in config_text, config_text
+assert '"127.0.0.1:23457"' in config_text, config_text
 assert rtsps_url in config_text, config_text
 assert "streams:" in config_text and "bambu:" in config_text, config_text
+assert "ffmpeg:bambu#video=mjpeg" in config_text, config_text
+assert r"C:\short\ffmpeg.exe" in config_text, config_text
 
 print("go2rtc camera bridge helpers OK.")
 print("Test complete.")

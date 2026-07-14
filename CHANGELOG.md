@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.1] - 2026-07-14
+### Fixed
+- Bambu RTSPS camera support (added in 1.4.0) didn't actually work: go2rtc requires an external
+  `ffmpeg` binary to decode `rtsps://` sources, which wasn't bundled. Now bundles a static
+  ffmpeg build alongside go2rtc.
+- go2rtc's `ffmpeg.bin` config value is naively whitespace-split before being run, so any path
+  containing a space (e.g. this app's own install folder, or a Windows username with a space in
+  it) silently broke ffmpeg invocation. Fixed by resolving ffmpeg's Windows 8.3 short (no-space)
+  path before writing it into go2rtc's config.
+- The generated go2rtc config now includes the required MJPEG-transcode producer entry
+  (`ffmpeg:<name>#video=mjpeg`) and a dedicated local RTSP loopback port - go2rtc's MJPEG output
+  needs an explicit transcode step from the camera's native H.264 and, via ffmpeg, pulls that
+  through go2rtc's own internal RTSP server, which can't be fully disabled as previously done.
+- Verified end-to-end against a real Bambu H2S.
+
 ## [1.4.0] - 2026-07-13
 ### Added
 - Bambu Lab camera support for X1/X1C/X1E/X2D/P2S/H2D/H2C/H2S via a bundled

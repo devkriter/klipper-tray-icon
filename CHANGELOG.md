@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.2] - 2026-07-18
 ### Fixed / Clarified
 - Corrected docs and the first-run prompt: Bambu Lab support does **not** require the printer's
   full "LAN Only Mode". Local MQTT status and the RTSPS camera both work with the printer in its

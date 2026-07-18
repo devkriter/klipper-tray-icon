@@ -1,5 +1,5 @@
 @echo off
-set VERSION=1.4.1
+set VERSION=1.4.2
 set GO2RTC_VERSION=v1.9.14
 set FFMPEG_ASSET=ffmpeg-n7.1-latest-win64-lgpl-7.1.zip
 echo Installing PyInstaller...

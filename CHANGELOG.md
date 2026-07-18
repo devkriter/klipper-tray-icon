@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+### Fixed / Clarified
+- Corrected docs and the first-run prompt: Bambu Lab support does **not** require the printer's
+  full "LAN Only Mode". Local MQTT status and the RTSPS camera both work with the printer in its
+  normal cloud-connected mode — the only camera-specific requirement is enabling **LAN Mode Live
+  View**. Verified end-to-end against a real Bambu H2S (LAN Only Mode off, Live View on): both
+  print progress and the live camera feed work.
+
 ## [1.4.1] - 2026-07-14
 ### Fixed
 - Bambu RTSPS camera support (added in 1.4.0) didn't actually work: go2rtc requires an external

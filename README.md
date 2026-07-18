@@ -1,7 +1,8 @@
 # Klipper Tray Icon
 
 A lightweight Windows system tray application that visualizes the status of your 3D print. Supports
-Klipper/Moonraker/Mainsail setups, and Bambu Lab printers over the local network (LAN Only Mode).
+Klipper/Moonraker/Mainsail setups, and Bambu Lab printers over the local network (no Bambu Cloud
+account required, and the printer's full "LAN Only Mode" is *not* required — see below).
 The icon updates dynamically to show a circular progress bar corresponding to the print progress.
 
 ## Features
@@ -17,21 +18,28 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   - Filename being printed
 - **Two Printer Backends**:
   - **Klipper / Moonraker** (Mainsail, Fluidd) over HTTP.
-  - **Bambu Lab** printers over local MQTT (requires **LAN Only Mode**).
+  - **Bambu Lab** printers over local MQTT (works with the printer in normal/cloud mode — full
+    "LAN Only Mode" is not required).
 - **Zero Configuration**: Prompts for your printer type and connection details on first run.
 - **Portable**: Run as a single `.exe` file without installation.
 
 ## Bambu Lab Support
 
-Bambu printers are supported via their local, LAN-only MQTT interface — no Bambu Cloud account is
-used or required. To connect:
+Bambu printers are supported via their local MQTT interface — no Bambu Cloud account is used or
+required, and the printer can stay in its normal (cloud-connected) mode. To connect:
 
-1. On the printer, enable **Settings > WLAN > LAN Only Mode**.
-2. From the same screen, note the printer's **IP address**, **Serial Number**, and **Access Code**.
-3. On first run, choose "Bambu Lab" and enter these three values when prompted.
+1. On the printer, go to **Settings > WLAN** and note the **IP address**, **Serial Number**, and
+   **Access Code**. Enabling full **LAN Only Mode** is *not* required — the local MQTT status and
+   the camera both work with the printer in normal mode.
+2. For the live camera feed, enable **LAN Mode Live View** in the printer's camera settings
+   (this is the only camera-specific toggle needed; it is separate from full LAN Only Mode).
+3. On first run, choose "Bambu Lab" and enter the three values (IP / Serial / Access Code).
+
+Verified end-to-end against a Bambu **H2S** in normal cloud-connected mode (LAN Only Mode off,
+LAN Mode Live View on): both status polling and the live camera feed work.
 
 Limitations:
-- Only LAN Only Mode is supported — there is no Bambu Cloud/remote connection option.
+- This is a local-network connection only — there is no Bambu Cloud/remote connection option.
 - Bambu has no official local API; this app uses the community-documented MQTT status schema
   (the same one used by tools like Home Assistant's Bambu Lab integration). Field names may drift
   across firmware versions — please report any mismatched status if you hit one.
@@ -96,7 +104,7 @@ For Klipper/Moonraker (see `config.example.json`):
 }
 ```
 
-For Bambu Lab, LAN Only Mode (see `config.example.bambu.json`):
+For Bambu Lab (see `config.example.bambu.json`):
 ```json
 {
     "printer_type": "bambu",

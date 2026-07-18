@@ -63,7 +63,7 @@ def _prompt_bambu_config():
 
     access_code = simpledialog.askstring(
         title="Bambu Access Code",
-        prompt="Enter your printer's Access Code:\n(Settings > WLAN, requires 'LAN Only Mode' enabled)"
+        prompt="Enter your printer's Access Code:\n(Settings > WLAN. LAN Only Mode is NOT required;\nfor the camera, enable 'LAN Mode Live View'.)"
     )
     if not access_code:
         sys.exit(0)

@@ -1,5 +1,7 @@
 {
     "printer_type": "klipper",
     "moonraker_url": "http://mainsail.local",
-    "update_interval_seconds": 2
+    "moonraker_api_key": "",
+    "update_interval_seconds": 2,
+    "notifications": true
 }

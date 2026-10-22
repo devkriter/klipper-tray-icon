@@ -3,5 +3,6 @@
     "bambu_ip": "192.168.1.50",
     "bambu_serial": "01P00A000000000",
     "bambu_access_code": "12345678",
-    "update_interval_seconds": 2
+    "update_interval_seconds": 2,
+    "notifications": true
 }

@@ -4,18 +4,20 @@ import time
 import threading
 import json
 import webbrowser
+import datetime
+import io
+import os
+import subprocess
+import ctypes
+import tkinter as tk
+
 from PIL import Image, ImageDraw
 import pystray
-import requests
-import datetime
 
+import autostart
 import backends
 
-__version__ = "1.4.2"
-
-import os
-import tkinter as tk
-from tkinter import simpledialog, messagebox
+__version__ = "1.5.0"
 
 # Configuration
 if getattr(sys, 'frozen', False):
@@ -29,92 +31,69 @@ CONFIG_FILE = os.path.join(application_path, "config.json")
 DEFAULT_CONFIG = {
     "printer_type": "klipper",
     "moonraker_url": "http://mainsail.local",
-    "update_interval_seconds": 2
+    "update_interval_seconds": 2,
+    "notifications": True,
 }
 
-def _prompt_klipper_config():
-    url = simpledialog.askstring(
-        title="Configuration",
-        prompt="Enter your Moonraker/Mainsail URL:\n(e.g., http://mainsail.local or http://192.168.1.100)",
-        initialvalue="http://mainsail.local"
-    )
-    if not url:
-        sys.exit(0)  # User cancelled
+STATE_LABELS = {
+    "printing": "Printing",
+    "paused": "Paused",
+    "complete": "Print complete",
+    "cancelled": "Print cancelled",
+    "error": "Printer error",
+    "standby": "Idle",
+    "offline": "Offline",
+}
 
-    new_config = DEFAULT_CONFIG.copy()
-    new_config["printer_type"] = "klipper"
-    new_config["moonraker_url"] = url
-    return new_config
 
-def _prompt_bambu_config():
-    ip = simpledialog.askstring(
-        title="Bambu Printer IP",
-        prompt="Enter your Bambu printer's local IP address:\n(Settings > WLAN on the printer)"
-    )
-    if not ip:
-        sys.exit(0)
-
-    serial = simpledialog.askstring(
-        title="Bambu Serial Number",
-        prompt="Enter your printer's Serial Number:\n(Settings > WLAN, or printed on the printer)"
-    )
-    if not serial:
-        sys.exit(0)
-
-    access_code = simpledialog.askstring(
-        title="Bambu Access Code",
-        prompt="Enter your printer's Access Code:\n(Settings > WLAN. LAN Only Mode is NOT required;\nfor the camera, enable 'LAN Mode Live View'.)"
-    )
-    if not access_code:
-        sys.exit(0)
-
-    new_config = DEFAULT_CONFIG.copy()
-    new_config["printer_type"] = "bambu"
-    new_config["bambu_ip"] = ip
-    new_config["bambu_serial"] = serial
-    new_config["bambu_access_code"] = access_code
-    return new_config
-
-def load_config():
+def read_config():
+    """Returns the saved config, or None if there isn't one yet."""
     try:
         with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
+            config = json.load(f)
     except FileNotFoundError:
-        # Prompt user if config doesn't exist
+        return None
+    merged = DEFAULT_CONFIG.copy()
+    merged.update(config)
+    return merged
+
+
+def write_config(config):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=4)
+
+
+def run_settings(first_run=False):
+    """Shows the settings window (blocking) and saves the result. Returns
+    True if the user saved."""
+    import settings_window
+    from tkinter import messagebox
+
+    config = read_config() or DEFAULT_CONFIG.copy()
+    new_config = settings_window.show(config, application_path, first_run=first_run,
+                                      icon_image=create_tray_icon("complete", 1.0))
+    if new_config is None:
+        return False
+    try:
+        write_config(new_config)
+    except OSError as e:
         root = tk.Tk()
-        root.withdraw() # Hide main window
+        root.withdraw()
+        messagebox.showerror("Klipper Tray Icon", f"Couldn't save settings to\n{CONFIG_FILE}\n\n{e}")
+        root.destroy()
+        return False
+    return True
 
-        is_klipper = messagebox.askyesno(
-            "Printer Type",
-            "What type of printer are you connecting to?\n\n"
-            "Yes = Klipper / Moonraker (Mainsail/Fluidd)\n"
-            "No = Bambu Lab (LAN Only Mode)"
-        )
 
-        new_config = _prompt_klipper_config() if is_klipper else _prompt_bambu_config()
-
-        try:
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(new_config, f, indent=4)
-            return new_config
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save config: {e}")
-            sys.exit(1)
-
-config = load_config()
-backend = backends.create_backend(config, application_path)
-
-def create_tray_icon(state, progress):
+def create_tray_icon(state, progress, size=64):
     """Generate a circular progress icon."""
-    width = 64
-    height = 64
+    width = height = size
+    k = size / 64  # geometry below is laid out on a 64px grid
     image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    
-    # Colors
-    bg_color = (130, 222, 230, 100) # Light circular background (Mainsail-ish blue/cyan tint) or gray
+
     bg_color = (200, 200, 200, 50)
-    
+
     if state == "printing":
         fg_color = (0, 255, 127, 255) # Spring Green
     elif state == "paused":
@@ -123,30 +102,35 @@ def create_tray_icon(state, progress):
         fg_color = (0, 191, 255, 255) # Deep Sky Blue
     elif state == "error":
         fg_color = (220, 20, 60, 255) # Crimson
-    else: # standby or unknown
+    elif state == "offline":
+        fg_color = (110, 110, 110, 255) # Dim gray, plus a red dot below
+    else: # standby, cancelled or unknown
         fg_color = (169, 169, 169, 255) # Dark Gray
 
     # Geometry
-    margin = 4
+    margin = 4 * k
+    ring = max(1, round(6 * k))
     bbox = (margin, margin, width - margin, height - margin)
-    
+
     # Draw background ring
-    draw.ellipse(bbox, outline=bg_color, width=6)
-    
+    draw.ellipse(bbox, outline=bg_color, width=ring)
+
     # Clamp progress
     progress = max(0.0, min(1.0, progress))
     if state == "printing":
         start_angle = -90
-        # Progress 0.0 to 1.0. If 0, draw nothing or small dot?
-        # If > 0, draw arc.
         if progress > 0:
             end_angle = start_angle + (360 * progress)
-            draw.arc(bbox, start=start_angle, end=end_angle, fill=fg_color, width=6)
+            draw.arc(bbox, start=start_angle, end=end_angle, fill=fg_color, width=ring)
     else:
-         # For non-printing states, fill the whole ring with the status color
-        draw.ellipse(bbox, outline=fg_color, width=6)
+        # For non-printing states, fill the whole ring with the status color
+        draw.ellipse(bbox, outline=fg_color, width=ring)
+
+    if state == "offline":
+        draw.ellipse((38 * k, 38 * k, 62 * k, 62 * k), fill=(220, 20, 60, 255))
 
     return image
+
 
 def format_time_delta(seconds):
     if seconds is None or seconds < 0: return "?"
@@ -156,81 +140,199 @@ def format_time_delta(seconds):
         return f"{h}h {m}m"
     return f"{m}m"
 
-# Global state
-current_state = "unknown"
-current_progress = 0.0
-shutdown_event = threading.Event()
 
-def update_loop(icon, backend):
-    """Background thread logic to update icon."""
-    icon.visible = True
-    global current_state, current_progress
+def describe_status(data):
+    """Returns (headline, detail_lines) for the tooltip and menu."""
+    label = STATE_LABELS.get(data.state, data.state.capitalize())
+    if data.state in ("printing", "paused"):
+        pct = int(data.progress * 100)
+        headline = f"{label} · {pct}%"
+        details = []
+        if data.state == "printing" and data.time_left:
+            eta = datetime.datetime.now() + datetime.timedelta(seconds=data.time_left)
+            source = "slicer" if data.eta_source == "Slicer" else "est."
+            details.append(f"{format_time_delta(data.time_left)} left · done {eta:%H:%M} ({source})")
+        if data.filename:
+            details.append(data.filename)
+        return headline, details
+    if data.state in ("complete", "cancelled") and data.filename:
+        return label, [data.filename]
+    if data.message:
+        return label, [data.message]
+    return label, []
 
-    import datetime
 
-    while icon.visible and not shutdown_event.is_set():
-        data = backend.get_status()
-        state = data.state
-        progress = data.progress
+def shorten(text, limit):
+    return text if len(text) <= limit else "…" + text[-(limit - 1):]
 
-        # Determine tooltip text
-        if state == "printing":
-            pct = int(progress * 100)
-            filename = data.filename or "Unknown"
-            time_left = data.time_left
-            eta_source = data.eta_source
 
-            # ETA
-            eta_dt = datetime.datetime.now() + datetime.timedelta(seconds=time_left)
-            eta_str = eta_dt.strftime("%H:%M")
-            left_str = format_time_delta(time_left)
-            
-            # Shorten filename
-            if len(filename) > 25:
-                filename = "..." + filename[-22:]
-            
-            source_label = "Slicer" if eta_source == "Slicer" else "Calc"
-            tooltip = f"Printing: {pct}%\nLeft: {left_str} ({source_label})\nETA: {eta_str}\n{filename}"
-        elif state == "error":
-             tooltip = "Connection Error / Printer Error"
-        else:
-            tooltip = f"Status: {state.capitalize()}"
-        
-        # Check change
-        if state != current_state or abs(progress - current_progress) > 0.005:
-            current_state = state
-            current_progress = progress
-            
-            icon.title = tooltip
-            icon.icon = create_tray_icon(state, progress)
-        
-        # Wait for interval or shutdown event
-        if shutdown_event.wait(timeout=config.get("update_interval_seconds", 2)):
-            break
+def get_mouse_pos():
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+    pt = POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
 
-def on_open_browser(icon, item):
-    if backend.dashboard_url:
-        webbrowser.open(backend.dashboard_url)
 
-def on_exit(icon, item):
-    shutdown_event.set()
-    icon.visible = False
-    icon.stop()
-    backend.stop()
-    os._exit(0)
+def self_command(*args):
+    """Command line that re-launches this app with extra arguments."""
+    if getattr(sys, 'frozen', False):
+        return [sys.executable, *args]
+    return [sys.executable, os.path.abspath(__file__), *args]
 
-import io
-import subprocess
 
-# ... (imports remain)
+class TrayApp:
+    def __init__(self, config):
+        self.config = config
+        self.backend = backends.create_backend(config, application_path)
+        self.status = backends.PrinterStatus(state="standby", progress=0.0, message="Connecting...")
+        self.shutdown_event = threading.Event()
+        self.icon = None
+        self._config_mtime = self._read_config_mtime()
+        self._settings_proc = None
+        self._last_drawn = None
+        # Last status we actually heard from the printer. Notifications
+        # compare against this so a brief network drop mid-print doesn't
+        # swallow the "print finished" notification.
+        self._last_online = self.status
 
-# Configuration handled above...
+    # ---- menu ---------------------------------------------------------
 
-# MJPEG Streaming Logic (Klipper/Moonraker only)
-def run_webcam_window(x=None, y=None):
+    def _status_lines(self):
+        headline, details = describe_status(self.status)
+        return [headline] + details
+
+    def _menu_line(self, index):
+        def text(item):
+            lines = self._status_lines()
+            return shorten(lines[index], 48) if index < len(lines) else ""
+        return text
+
+    def _menu_line_visible(self, index):
+        return lambda item: index < len(self._status_lines())
+
+    def build_menu(self):
+        return pystray.Menu(
+            pystray.MenuItem(self._menu_line(0), None, enabled=False),
+            pystray.MenuItem(self._menu_line(1), None, enabled=False, visible=self._menu_line_visible(1)),
+            pystray.MenuItem(self._menu_line(2), None, enabled=False, visible=self._menu_line_visible(2)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Show webcam", self.on_show_webcam, default=True,
+                             visible=lambda item: self.backend.supports_webcam),
+            pystray.MenuItem("Open web interface", self.on_open_browser,
+                             visible=lambda item: bool(self.backend.dashboard_url)),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Settings…", self.on_settings),
+            pystray.MenuItem("Exit", self.on_exit),
+        )
+
+    # ---- actions ------------------------------------------------------
+
+    def on_show_webcam(self, icon, item):
+        mx, my = get_mouse_pos()
+        subprocess.Popen(self_command("--webcam", str(mx), str(my)))
+
+    def on_open_browser(self, icon, item):
+        if self.backend.dashboard_url:
+            webbrowser.open(self.backend.dashboard_url)
+
+    def on_settings(self, icon, item):
+        if self._settings_proc is not None and self._settings_proc.poll() is None:
+            # Already open - bring it to the front instead of opening another.
+            import settings_window
+            hwnd = ctypes.windll.user32.FindWindowW(None, settings_window.WINDOW_TITLE)
+            if hwnd:
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            return
+        # The window saves config.json itself; update_loop notices the change.
+        self._settings_proc = subprocess.Popen(self_command("--settings"))
+
+    def on_exit(self, icon, item):
+        self.shutdown_event.set()
+        icon.visible = False
+        icon.stop()
+        self.backend.stop()
+        os._exit(0)
+
+    # ---- background loop ----------------------------------------------
+
+    def _read_config_mtime(self):
+        try:
+            return os.path.getmtime(CONFIG_FILE)
+        except OSError:
+            return None
+
+    def _reload_config_if_changed(self):
+        mtime = self._read_config_mtime()
+        if mtime == self._config_mtime:
+            return
+        self._config_mtime = mtime
+        try:
+            config = read_config()
+        except (OSError, ValueError):
+            return  # half-written or hand-edited badly; keep the old settings
+        if config is None:
+            return
+        old = self.backend
+        self.config = config
+        self.backend = backends.create_backend(config, application_path)
+        self.backend.start()
+        old.stop()
+        self.status = backends.PrinterStatus(state="standby", progress=0.0, message="Connecting...")
+        self._last_online = self.status
+        self._last_drawn = None
+
+    def _notify_transition(self, old, new):
+        if not self.config.get("notifications", True) or old.state != "printing":
+            return
+        name = new.filename or old.filename or "Your print"
+        messages = {
+            "complete": ("Print finished", f"{name} is done."),
+            "error": ("Print failed", f"{name} stopped with a printer error."),
+            "cancelled": ("Print cancelled", f"{name} was cancelled."),
+            "paused": ("Print paused", f"{name} is paused."),
+        }
+        if new.state in messages:
+            title, body = messages[new.state]
+            try:
+                self.icon.notify(body, title)
+            except Exception:
+                pass
+
+    def update_loop(self, icon):
+        icon.visible = True
+        while not self.shutdown_event.is_set():
+            self._reload_config_if_changed()
+            new = self.backend.get_status()
+            self.status = new
+            if new.state != "offline":
+                self._notify_transition(self._last_online, new)
+                self._last_online = new
+
+            # Windows caps tray tooltips at 127 characters.
+            icon.title = shorten("\n".join(self._status_lines()), 127)
+
+            drawn = (new.state, round(new.progress, 2))
+            if drawn != self._last_drawn:
+                self._last_drawn = drawn
+                icon.icon = create_tray_icon(new.state, new.progress)
+            icon.update_menu()
+
+            if self.shutdown_event.wait(timeout=self.config.get("update_interval_seconds", 2)):
+                break
+
+    def run(self):
+        autostart.refresh_path()
+        self.backend.start()
+        self.icon = pystray.Icon("KlipperTray", create_tray_icon("standby", 0.0),
+                                 "Connecting...", self.build_menu())
+        self.icon.run(setup=self.update_loop)
+
+
+def run_webcam_window(backend, x=None, y=None):
     """Run the webcam viewer in a Tkinter window."""
     root = tk.Tk()
-    root.title("Klipper Webcam")
+    root.title("Printer Webcam")
     
     # "Popup" style dimensions
     width = 640
@@ -360,69 +462,36 @@ def run_webcam_window(x=None, y=None):
     
     root.mainloop()
 
-# ... (Existing Tray Logic) ...
-
-import ctypes
-
-def get_mouse_pos():
-    class POINT(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-    pt = POINT()
-    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-    return pt.x, pt.y
-
-def on_show_webcam(icon, item):
-    """Launch the webcam viewer as a subprocess."""
-    mx, my = get_mouse_pos()
-    
-    if getattr(sys, 'frozen', False):
-         cmd = [sys.executable, "--webcam", str(mx), str(my)]
-    else:
-         cmd = [sys.executable, __file__, "--webcam", str(mx), str(my)]
-    
-    subprocess.Popen(cmd)
-
 def main():
-    # Argument handling
-    if len(sys.argv) > 1 and sys.argv[1] == "--webcam":
+    args = sys.argv[1:]
+
+    if args[:1] == ["--settings"]:
+        run_settings(first_run=read_config() is None)
+        return
+
+    config = read_config()
+    if config is None:
+        # First launch: set up before showing anything in the tray.
+        if not run_settings(first_run=True):
+            return
+        config = read_config()
+
+    if args[:1] == ["--webcam"]:
+        backend = backends.create_backend(config, application_path)
         if not backend.supports_webcam:
             print("Webcam not supported for this printer type")
             sys.exit(1)
-
         x, y = None, None
-        if len(sys.argv) >= 4:
+        if len(args) >= 3:
             try:
-                x = int(sys.argv[2])
-                y = int(sys.argv[3])
-            except ValueError: pass
-
-        try:
-            from PIL import ImageTk
-        except ImportError:
-            print("PIL.ImageTk missing")
-            sys.exit(1)
-
-        run_webcam_window(x, y)
+                x, y = int(args[1]), int(args[2])
+            except ValueError:
+                pass
+        run_webcam_window(backend, x, y)
         return
 
-    backend.start()
+    TrayApp(config).run()
 
-    # Initial state
-    initial_image = create_tray_icon("standby", 0.0)
-
-    # Context Menu (built based on what the active backend supports)
-    items = []
-    if backend.supports_webcam:
-        items.append(pystray.MenuItem("Show Webcam", on_show_webcam, default=True))
-    if backend.dashboard_url:
-        items.append(pystray.MenuItem("Open Mainsail", on_open_browser))
-    items.append(pystray.MenuItem("Exit", on_exit))
-    menu = pystray.Menu(*items)
-
-    icon = pystray.Icon("KlipperTray", initial_image, "Connecting...", menu)
-
-    # Pass update_loop as the setup function
-    icon.run(setup=lambda ic: update_loop(ic, backend))
 
 if __name__ == "__main__":
     main()

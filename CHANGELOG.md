@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0] - 2026-10-22
+### Added
+- Settings window (right-click → Settings…) replacing hand-editing `config.json`: printer type,
+  connection details with a **Test connection** button, refresh interval, notifications and
+  Start with Windows. Matches the Windows light/dark theme. Changes apply live, no restart.
+- First-run welcome window replacing the chain of Yes/No and text prompts.
+- Notifications when a print finishes, fails, is cancelled or pauses.
+- Status lines (progress, time left, ETA, file name) at the top of the tray menu.
+- Distinct "offline" state (gray ring with red dot) with a specific reason, e.g. "Printer
+  rejected the access code" or "Can't reach http://mainsail.local".
+- Optional Moonraker API key in Settings (with an info tooltip on when it's needed), for
+  setups where Moonraker doesn't already trust the PC, e.g. over Tailscale or a VPN.
+- Proper app icon and version info on the exe.
+
+### Changed
+- Release is now a zip containing an app folder instead of a single self-extracting `.exe`,
+  which Windows Defender was flagging as a virus. go2rtc and ffmpeg now sit next to the exe.
+- Klipper addresses without `http://` (e.g. `mainsail.local`) are accepted.
+
+### Fixed
+- ffmpeg download for the Bambu camera 404'd (upstream dropped the 7.1 build); now uses 8.1.
+- `build.bat` now installs `requirements.txt`, so builds can't silently miss `paho-mqtt`.
+
 ## [1.4.2] - 2026-07-18
 ### Fixed / Clarified
 - Corrected docs and the first-run prompt: Bambu Lab support does **not** require the printer's

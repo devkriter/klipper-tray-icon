@@ -23,9 +23,9 @@ GO2RTC_VERSION = "v1.9.14"
 GO2RTC_WIN64_URL = f"https://github.com/AlexxIT/go2rtc/releases/download/{GO2RTC_VERSION}/go2rtc_win64.zip"
 
 # go2rtc has no native RTSPS decoder - for "rtsps://" sources it always
-# shells out to an external ffmpeg binary. Pinned to the n7.1 static
+# shells out to an external ffmpeg binary. Pinned to the n8.1 static
 # (no separate DLLs) Windows build from BtbN's GitHub-hosted releases.
-FFMPEG_ASSET = "ffmpeg-n7.1-latest-win64-lgpl-7.1.zip"
+FFMPEG_ASSET = "ffmpeg-n8.1-latest-win64-lgpl-8.1.zip"
 FFMPEG_URL = f"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/{FFMPEG_ASSET}"
 
 
@@ -78,6 +78,22 @@ def build_go2rtc_config(port, rtsp_port, stream_name, rtsps_url, ffmpeg_bin=None
     return "\n".join(lines) + "\n"
 
 
+def _bundled_helper_path(name):
+    """Packaged builds ship go2rtc/ffmpeg as plain files next to the main exe
+    (not packed inside it - self-extracting helper binaries trip antivirus
+    heuristics). Also checks PyInstaller's _MEIPASS for older-style builds."""
+    if not getattr(sys, "frozen", False):
+        return None
+    dirs = [os.path.dirname(sys.executable)]
+    if hasattr(sys, "_MEIPASS"):
+        dirs.append(sys._MEIPASS)
+    for d in dirs:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 class Go2RtcCameraBridge:
     def __init__(self, ip, access_code, app_dir, stream_name="bambu"):
         self.ip = ip
@@ -89,11 +105,7 @@ class Go2RtcCameraBridge:
         self._port = None
 
     def _bundled_binary_path(self):
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            candidate = os.path.join(sys._MEIPASS, "go2rtc.exe")
-            if os.path.exists(candidate):
-                return candidate
-        return None
+        return _bundled_helper_path("go2rtc.exe")
 
     def _cached_binary_path(self):
         return os.path.join(self.app_dir, "go2rtc_cache", f"go2rtc_{GO2RTC_VERSION}.exe")
@@ -123,11 +135,7 @@ class Go2RtcCameraBridge:
         return cached
 
     def _bundled_ffmpeg_path(self):
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            candidate = os.path.join(sys._MEIPASS, "ffmpeg.exe")
-            if os.path.exists(candidate):
-                return candidate
-        return None
+        return _bundled_helper_path("ffmpeg.exe")
 
     def _cached_ffmpeg_path(self):
         return os.path.join(self.app_dir, "go2rtc_cache", "ffmpeg.exe")

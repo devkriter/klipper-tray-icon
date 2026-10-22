@@ -2,3 +2,4 @@ pystray
 Pillow
 requests
 paho-mqtt>=1.6,<2.0
+sv-ttk

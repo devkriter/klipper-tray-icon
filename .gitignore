@@ -11,3 +11,5 @@ go2rtc_cache/
 ffmpeg.exe
 ffmpeg_build.zip
 ffmpeg_extract/
+version_info.txt
+app.ico

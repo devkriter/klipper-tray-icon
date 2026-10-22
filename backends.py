@@ -12,10 +12,10 @@ import paho.mqtt.client as mqtt
 import camera_bridge
 
 
-def _iter_http_mjpeg_frames(url, stop_event):
+def _iter_http_mjpeg_frames(url, stop_event, headers=None):
     """Consume a plain HTTP MJPEG stream, yielding each JPEG frame as bytes."""
     try:
-        with requests.get(url, stream=True, timeout=5) as r:
+        with requests.get(url, stream=True, timeout=5, headers=headers) as r:
             r.raise_for_status()
             bytes_buffer = b''
             for chunk in r.iter_content(chunk_size=4096):
@@ -36,11 +36,38 @@ def _iter_http_mjpeg_frames(url, stop_event):
 
 @dataclass
 class PrinterStatus:
+    # state is one of: printing, paused, complete, cancelled, error (printer
+    # reports a fault), standby, or offline (we can't talk to the printer -
+    # message says why).
     state: str
     progress: float
     filename: str = ""
     time_left: float = 0.0
     eta_source: str = "Calc"
+    message: str = ""
+
+
+def normalize_moonraker_url(url):
+    """Accepts what people actually type ("mainsail.local", "192.168.1.5/")
+    and returns a usable base URL."""
+    url = (url or "").strip().rstrip("/")
+    if url and "://" not in url:
+        url = "http://" + url
+    return url
+
+
+def _describe_request_error(e, url, api_key=""):
+    if isinstance(e, requests.exceptions.Timeout):
+        return f"{url} didn't respond in time"
+    if isinstance(e, requests.exceptions.ConnectionError):
+        return f"Can't reach {url}"
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        if e.response.status_code in (401, 403):
+            if api_key:
+                return "Moonraker rejected the API key"
+            return "Moonraker refused access - enter an API key in Settings"
+        return f"{url} returned HTTP {e.response.status_code}"
+    return f"Unexpected response from {url}"
 
 
 class PrinterBackend:
@@ -64,8 +91,12 @@ class PrinterBackend:
 class MoonrakerBackend(PrinterBackend):
     supports_webcam = True
 
-    def __init__(self, moonraker_url):
-        self.moonraker_url = moonraker_url.rstrip("/")
+    def __init__(self, moonraker_url, api_key=""):
+        self.moonraker_url = normalize_moonraker_url(moonraker_url)
+        self.api_key = (api_key or "").strip()
+        # Only needed when Moonraker doesn't already trust this PC's address
+        # (trusted_clients in moonraker.conf), e.g. over Tailscale/VPN.
+        self._headers = {"X-Api-Key": self.api_key} if self.api_key else {}
         self.dashboard_url = self.moonraker_url
         self._last_filename = None
         self._cached_estimated_time = None
@@ -75,7 +106,7 @@ class MoonrakerBackend(PrinterBackend):
         try:
             # Query print_stats, display_status, virtual_sdcard
             url = f"{self.moonraker_url}/printer/objects/query?print_stats&display_status&virtual_sdcard"
-            response = requests.get(url, timeout=2)
+            response = requests.get(url, timeout=2, headers=self._headers)
             response.raise_for_status()
             data = response.json()
 
@@ -101,7 +132,7 @@ class MoonrakerBackend(PrinterBackend):
                     try:
                         # Fetch metadata
                         meta_url = f"{self.moonraker_url}/server/files/metadata?filename={filename}"
-                        meta_resp = requests.get(meta_url, timeout=2)
+                        meta_resp = requests.get(meta_url, timeout=2, headers=self._headers)
                         if meta_resp.ok:
                             meta_data = meta_resp.json()
                             self._cached_estimated_time = meta_data.get("result", {}).get("estimated_time")
@@ -131,14 +162,29 @@ class MoonrakerBackend(PrinterBackend):
                 time_left=time_left,
                 eta_source=eta_source,
             )
-        except Exception:
-            return PrinterStatus(state="error", progress=0.0, filename="", time_left=0)
+        except Exception as e:
+            return PrinterStatus(state="offline", progress=0.0,
+                                 message=_describe_request_error(e, self.moonraker_url, self.api_key))
+
+    def test_connection(self):
+        """Returns (ok, message) for the settings window's Test button."""
+        try:
+            r = requests.get(f"{self.moonraker_url}/printer/info", timeout=4, headers=self._headers)
+            r.raise_for_status()
+            info = r.json().get("result", {})
+        except Exception as e:
+            return False, _describe_request_error(e, self.moonraker_url, self.api_key)
+        host = info.get("hostname") or self.moonraker_url
+        klippy = info.get("state", "unknown")
+        if klippy != "ready":
+            return True, f"Connected to {host}, but Klipper is '{klippy}'"
+        return True, f"Connected to {host}"
 
     def get_webcam_url(self):
         """Discover webcam URL from Moonraker."""
         try:
             url = f"{self.moonraker_url}/server/webcams/list"
-            response = requests.get(url, timeout=2)
+            response = requests.get(url, timeout=2, headers=self._headers)
             response.raise_for_status()
             data = response.json()
             webcams = data.get("result", {}).get("webcams", [])
@@ -165,7 +211,10 @@ class MoonrakerBackend(PrinterBackend):
             return f"{self.moonraker_url}/webcam/?action=stream"
 
     def iter_webcam_frames(self, stop_event):
-        yield from _iter_http_mjpeg_frames(self.get_webcam_url(), stop_event)
+        url = self.get_webcam_url()
+        # Don't hand the key to a camera hosted somewhere else.
+        headers = self._headers if url.startswith(self.moonraker_url) else None
+        yield from _iter_http_mjpeg_frames(url, stop_event, headers)
 
 
 # Bambu gcode_state -> this app's common state vocabulary
@@ -227,6 +276,7 @@ class BambuBackend(PrinterBackend):
         self._client = None
         self._connected = False
         self._connected_at = None
+        self._connect_rc = None
         self._latest_report = None
         self._last_message_time = None
         self._camera_bridge = None
@@ -235,6 +285,7 @@ class BambuBackend(PrinterBackend):
         with self._lock:
             self._connected = (rc == 0)
             self._connected_at = time.monotonic()
+            self._connect_rc = rc
         if rc == 0:
             client.subscribe(f"device/{self.serial}/report")
             client.publish(
@@ -284,21 +335,49 @@ class BambuBackend(PrinterBackend):
         if bridge is not None:
             bridge.stop()
 
-    def get_status(self) -> PrinterStatus:
+    def _offline_reason(self, first_report_timeout):
+        """None if things look healthy (or it's too early to tell)."""
         with self._lock:
             connected = self._connected
             connected_at = self._connected_at
-            report = self._latest_report
+            rc = self._connect_rc
+            has_report = self._latest_report is not None
 
+        if rc in (4, 5):  # MQTT "bad username/password" / "not authorized"
+            return "Printer rejected the access code"
         if not connected:
-            return PrinterStatus(state="error", progress=0.0, filename="", time_left=0)
+            return f"Can't reach printer at {self.ip}"
+        if not has_report and connected_at is not None                 and (time.monotonic() - connected_at) > first_report_timeout:
+            return "Connected, but no data from printer - check the serial number"
+        return None
 
+    def get_status(self) -> PrinterStatus:
+        reason = self._offline_reason(_FIRST_REPORT_TIMEOUT)
+        if reason:
+            return PrinterStatus(state="offline", progress=0.0, message=reason)
+
+        with self._lock:
+            report = self._latest_report
         if report is None:
-            if connected_at is not None and (time.monotonic() - connected_at) > _FIRST_REPORT_TIMEOUT:
-                return PrinterStatus(state="error", progress=0.0, filename="", time_left=0)
-            return PrinterStatus(state="standby", progress=0.0, filename="", time_left=0)
-
+            return PrinterStatus(state="standby", progress=0.0, message="Waiting for printer...")
         return parse_bambu_report(report)
+
+    def test_connection(self, timeout=12):
+        """Returns (ok, message). Blocks up to `timeout` seconds; must be
+        called on a backend that was start()ed just for the test."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._lock:
+                rc = self._connect_rc
+                report = self._latest_report
+            if report is not None:
+                status = parse_bambu_report(report)
+                return True, f"Connected - printer is {status.state}"
+            if rc in (4, 5):
+                return False, "Printer rejected the access code"
+            time.sleep(0.2)
+        reason = self._offline_reason(first_report_timeout=0)
+        return False, reason or f"No response from printer at {self.ip}"
 
     def iter_webcam_frames(self, stop_event):
         bridge = camera_bridge.Go2RtcCameraBridge(self.ip, self.access_code, self.app_dir)
@@ -316,6 +395,16 @@ class BambuBackend(PrinterBackend):
                     self._camera_bridge = None
 
 
+def test_connection(config: dict, app_dir: str):
+    """Spins up a throwaway backend for `config` and reports (ok, message)."""
+    backend = create_backend(config, app_dir)
+    backend.start()
+    try:
+        return backend.test_connection()
+    finally:
+        backend.stop()
+
+
 def create_backend(config: dict, app_dir: str) -> PrinterBackend:
     printer_type = config.get("printer_type", "klipper")
     if printer_type == "bambu":
@@ -325,4 +414,5 @@ def create_backend(config: dict, app_dir: str) -> PrinterBackend:
             access_code=config.get("bambu_access_code", ""),
             app_dir=app_dir,
         )
-    return MoonrakerBackend(config.get("moonraker_url", "http://mainsail.local"))
+    return MoonrakerBackend(config.get("moonraker_url", "http://mainsail.local"),
+                            api_key=config.get("moonraker_api_key", ""))

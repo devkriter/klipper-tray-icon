@@ -47,5 +47,33 @@ assert "ffmpeg:bambu#video=mjpeg" in config_text, config_text
 assert r"C:\short\ffmpeg.exe" in config_text, config_text
 
 print("go2rtc camera bridge helpers OK.")
+
+# Settings / tray helpers (no network, no windows).
+assert backends.normalize_moonraker_url(" mainsail.local/ ") == "http://mainsail.local"
+assert backends.normalize_moonraker_url("https://printer:7125") == "https://printer:7125"
+assert backends.normalize_moonraker_url("") == ""
+
+keyed = backends.create_backend({"moonraker_url": "x", "moonraker_api_key": " k "}, ".")
+assert keyed._headers == {"X-Api-Key": "k"}, keyed._headers
+assert backends.create_backend({"moonraker_url": "x"}, ".")._headers == {}
+
+import klipper_tray
+printing = backends.PrinterStatus(state="printing", progress=0.456, filename="Benchy.gcode",
+                                  time_left=3900, eta_source="Slicer")
+headline, details = klipper_tray.describe_status(printing)
+assert headline == "Printing · 45%", headline
+assert details[0].startswith("1h 5m left"), details
+assert details[1] == "Benchy.gcode", details
+
+offline = backends.PrinterStatus(state="offline", progress=0.0, message="Can't reach http://x")
+assert klipper_tray.describe_status(offline) == ("Offline", ["Can't reach http://x"])
+assert klipper_tray.shorten("abcdef", 4) == "…def"
+
+for state in ("printing", "paused", "complete", "error", "offline", "standby"):
+    for size in (64, 256):
+        img = klipper_tray.create_tray_icon(state, 0.5, size=size)
+        assert img.size == (size, size)
+
+print("Tray / settings helpers OK.")
 print("Test complete.")
 exit(0)

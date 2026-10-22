@@ -11,17 +11,20 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   - 🟢 **Green Ring**: Printing
   - 🟠 **Orange Ring**: Paused
   - 🔵 **Blue Ring**: Complete
-  - 🔴 **Red Ring**: Error/Disconnected
-- **Rich Tooltip**: Hover to see detailed status:
-  - Percentage Complete
-  - Time Remaining & ETA
-  - Filename being printed
+  - 🔴 **Red Ring**: Printer error
+  - ⚪ **Gray Ring with red dot**: Offline (can't reach the printer — hover or right-click for why)
+- **Status at a glance**: hover or right-click the icon to see progress, time left, ETA and the
+  file being printed.
+- **Notifications** when a print finishes, fails, is cancelled or pauses.
+- **Settings window**: switch printers, test the connection, change the refresh rate, and turn
+  notifications and *Start with Windows* on or off. Changes apply immediately.
 - **Two Printer Backends**:
   - **Klipper / Moonraker** (Mainsail, Fluidd) over HTTP.
   - **Bambu Lab** printers over local MQTT (works with the printer in normal/cloud mode — full
     "LAN Only Mode" is not required).
-- **Zero Configuration**: Prompts for your printer type and connection details on first run.
-- **Portable**: Run as a single `.exe` file without installation.
+- **Guided setup**: a welcome window asks for your printer details on first run, with a
+  *Test connection* button.
+- **Portable**: Unzip and run - no installation.
 
 ## Bambu Lab Support
 
@@ -56,17 +59,17 @@ Limitations:
 - **P1P / P1S / A1 / A1 mini**: not yet supported (these models use a different local camera
   protocol). "Show Webcam" will show "Camera unavailable" on these printers.
 - When run from source, the first "Show Webcam" click downloads and caches `go2rtc.exe` (~19MB)
-  and `ffmpeg.exe` (~110MB) into a `go2rtc_cache` folder next to `config.json`. The packaged
-  `.exe` build already has both bundled in, so no download happens for end users running the
-  release build.
+  and `ffmpeg.exe` (~110MB) into a `go2rtc_cache` folder next to `config.json`. The release
+  zip already ships both next to `KlipperTrayIcon.exe`, so no download happens for end users.
 
 ## Installation
 
 ### Method 1: Download Executable (Recommended)
 1. Go to the [Releases](../../releases) page.
-2. Download the latest `KlipperTrayIcon_vX.X.X.exe`.
-3. Run the file.
-4. On first launch, enter your printer's URL (e.g., `http://mainsail.local`).
+2. Download the latest `KlipperTrayIcon_vX.X.X.zip`.
+3. Extract it anywhere and run `KlipperTrayIcon.exe` from the extracted folder (keep the other
+   files and the `_internal` folder next to it).
+4. On first launch, pick your printer type, enter its details and click **Start**.
 
 ### Method 2: Run from Source
 If you prefer to run the Python script directly:
@@ -89,18 +92,21 @@ To build the `.exe` yourself:
    ```bash
    build.bat
    ```
-3. The executable will be in the `dist/` folder.
+3. The app folder is `dist/KlipperTrayIcon/` and the release zip is `dist/KlipperTrayIcon_vX.X.X.zip`.
 
 ## Configuration
-The application stores its configuration in a `config.json` file in the same directory as the executable.
-Wait for the prompt on first run, or create the file manually.
+Right-click the tray icon and choose **Settings…** to change anything. Settings are stored in a
+`config.json` file next to the executable; you can also edit it by hand, and the app picks up the
+change within a few seconds.
 
 For Klipper/Moonraker (see `config.example.json`):
 ```json
 {
     "printer_type": "klipper",
     "moonraker_url": "http://your-printer-ip",
-    "update_interval_seconds": 2
+    "moonraker_api_key": "",
+    "update_interval_seconds": 2,
+    "notifications": true
 }
 ```
 
@@ -111,9 +117,15 @@ For Bambu Lab (see `config.example.bambu.json`):
     "bambu_ip": "192.168.1.50",
     "bambu_serial": "your-printer-serial",
     "bambu_access_code": "your-lan-access-code",
-    "update_interval_seconds": 2
+    "update_interval_seconds": 2,
+    "notifications": true
 }
 ```
+
+`moonraker_api_key` is optional. Moonraker lets devices on your home network in without one
+(via `trusted_clients` in `moonraker.conf`), so you only need it if this PC reaches the printer
+from elsewhere (Tailscale, VPN, internet) or Moonraker has been set to require logins. Get it by
+running `~/moonraker/scripts/fetch-apikey.sh` on the printer.
 
 ## License
 MIT

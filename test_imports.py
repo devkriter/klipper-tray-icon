@@ -57,6 +57,9 @@ keyed = backends.create_backend({"moonraker_url": "x", "moonraker_api_key": " k 
 assert keyed._headers == {"X-Api-Key": "k"}, keyed._headers
 assert backends.create_backend({"moonraker_url": "x"}, ".")._headers == {}
 
+assert backends.create_backend({"moonraker_url": "x"}, ".").supports_console
+assert not backends.create_backend({"printer_type": "bambu"}, ".").supports_console
+
 import klipper_tray
 printing = backends.PrinterStatus(state="printing", progress=0.456, filename="Benchy.gcode",
                                   time_left=3900, eta_source="Slicer")

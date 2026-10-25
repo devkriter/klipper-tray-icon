@@ -9,7 +9,9 @@ import io
 import os
 import subprocess
 import ctypes
+import queue
 import tkinter as tk
+import tkinter.font as tkfont
 
 from PIL import Image, ImageDraw
 import pystray
@@ -17,7 +19,7 @@ import pystray
 import autostart
 import backends
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 # Configuration
 if getattr(sys, 'frozen', False):
@@ -33,6 +35,7 @@ DEFAULT_CONFIG = {
     "moonraker_url": "http://mainsail.local",
     "update_interval_seconds": 2,
     "notifications": True,
+    "webcam_console": True,
 }
 
 STATE_LABELS = {
@@ -329,15 +332,146 @@ class TrayApp:
         self.icon.run(setup=self.update_loop)
 
 
-def run_webcam_window(backend, x=None, y=None):
+class ConsolePanel:
+    """Read-only Klipper console (Moonraker's gcode store) shown beside the
+    webcam. A background thread polls Moonraker; the Tk side drains a queue
+    so all widget updates stay on the Tk thread."""
+
+    POLL_SECONDS = 1.0
+    MAX_LINES = 500
+
+    def __init__(self, parent, backend, stop_event, width):
+        self.backend = backend
+        self.stop_event = stop_event
+        self.queue = queue.Queue()
+
+        self.frame = tk.Frame(parent, bg="#141414", width=width)
+        self.frame.pack_propagate(False)
+
+        header = tk.Label(self.frame, text="CONSOLE", bg="#141414", fg="#8a8a8a",
+                          font=("Segoe UI Semibold", 8), anchor="w", padx=10, pady=6)
+        header.pack(fill=tk.X)
+
+        # No scrollbar: Windows' native one can't be dark-themed and looks
+        # out of place here. The mouse wheel scrolls the text.
+        mono = tkfont.Font(family="Consolas", size=9)
+        self.text = tk.Text(self.frame, bg="#141414", fg="#d6d6d6", font=mono, wrap=tk.WORD,
+                            bd=0, highlightthickness=0, padx=10, pady=2, cursor="arrow",
+                            spacing1=1, spacing3=2)
+        self.text.pack(fill=tk.BOTH, expand=True)
+
+        # Wrapped lines line up under the message, not under the timestamp.
+        self.text.tag_configure("line", lmargin2=mono.measure("00:00:00  "))
+        self.text.tag_configure("time", foreground="#5f5f5f")
+        self.text.tag_configure("command", foreground="#6cb6ff")
+        self.text.tag_configure("echo", foreground="#9a9a9a")
+        self.text.tag_configure("error", foreground="#ff6b6b")
+        self.text.tag_configure("status", foreground="#8a8a8a", font=("Segoe UI", 9, "italic"))
+        self.text.configure(state=tk.DISABLED)
+        self._append_status("Loading console…")
+        self._has_lines = False
+
+        threading.Thread(target=self._poll_loop, daemon=True).start()
+        self.frame.after(200, self._drain)
+
+    # -- background thread --
+
+    def _poll_loop(self):
+        last_time = 0.0
+        last_error = None
+        while not self.stop_event.is_set():
+            try:
+                entries = self.backend.get_console_messages()
+                new = [e for e in entries if e.get("time", 0) > last_time]
+                if new:
+                    last_time = max(e.get("time", 0) for e in new)
+                    self.queue.put(("lines", new))
+                elif last_error is not None or last_time == 0.0:
+                    self.queue.put(("lines", []))
+                last_error = None
+            except Exception as e:
+                message = self.backend.describe_error(e)
+                if message != last_error:
+                    last_error = message
+                    self.queue.put(("error", message))
+            self.stop_event.wait(self.POLL_SECONDS)
+
+    # -- Tk thread --
+
+    def _drain(self):
+        try:
+            while True:
+                kind, payload = self.queue.get_nowait()
+                if kind == "lines":
+                    self._show_lines(payload)
+                else:
+                    self._append_status(f"Console unavailable: {payload}")
+        except queue.Empty:
+            pass
+        if not self.stop_event.is_set():
+            self.frame.after(200, self._drain)
+
+    def _at_bottom(self):
+        return self.text.yview()[1] >= 0.999
+
+    def _show_lines(self, entries):
+        if not self._has_lines:
+            # First successful fetch: drop the "Loading..." placeholder.
+            self._clear()
+            self._has_lines = True
+            if not entries:
+                self._append_status("No console messages yet.")
+                return
+        follow = self._at_bottom()
+        self.text.configure(state=tk.NORMAL)
+        for entry in entries:
+            message = str(entry.get("message", "")).rstrip()
+            stamp = datetime.datetime.fromtimestamp(entry.get("time", time.time())).strftime("%H:%M:%S")
+            if entry.get("type") == "command":
+                tag, message = "command", "> " + message
+            elif message.startswith("!!"):
+                tag = "error"
+            elif message.startswith("//"):
+                tag = "echo"
+            else:
+                tag = None
+            self.text.insert(tk.END, stamp + "  ", ("line", "time"))
+            self.text.insert(tk.END, message + "\n", ("line", tag) if tag else "line")
+        self._trim()
+        self.text.configure(state=tk.DISABLED)
+        if follow:
+            self.text.see(tk.END)
+
+    def _append_status(self, message):
+        follow = self._at_bottom()
+        self.text.configure(state=tk.NORMAL)
+        self.text.insert(tk.END, message + "\n", "status")
+        self.text.configure(state=tk.DISABLED)
+        if follow:
+            self.text.see(tk.END)
+
+    def _clear(self):
+        self.text.configure(state=tk.NORMAL)
+        self.text.delete("1.0", tk.END)
+        self.text.configure(state=tk.DISABLED)
+
+    def _trim(self):
+        lines = int(self.text.index("end-1c").split(".")[0])
+        if lines > self.MAX_LINES:
+            self.text.delete("1.0", f"{lines - self.MAX_LINES}.0")
+
+
+def run_webcam_window(backend, x=None, y=None, show_console=False):
     """Run the webcam viewer in a Tkinter window."""
     root = tk.Tk()
     root.title("Printer Webcam")
-    
+
     # "Popup" style dimensions
-    width = 640
+    video_width = 640
+    console_width = 340 if show_console and backend.supports_console else 0
+    width = video_width + console_width
     height = 480
-    
+
     # Configure window style
     root.configure(bg="#202020") # Dark grey background
     root.overrideredirect(True)  # Remove OS title bar
@@ -375,11 +509,19 @@ def run_webcam_window(backend, x=None, y=None):
     content_frame = tk.Frame(root, bg="#000000")
     content_frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1) # 1px border
     
-    lbl_video = tk.Label(content_frame, bg="black")
+    video_frame = tk.Frame(content_frame, bg="black", width=video_width)
+    video_frame.pack_propagate(False)
+    video_frame.pack(side=tk.LEFT, fill=tk.Y)
+    lbl_video = tk.Label(video_frame, bg="black")
     lbl_video.pack(fill=tk.BOTH, expand=True)
-    
+
     # Threaded frame fetcher
     stop_event = threading.Event()
+
+    if console_width:
+        tk.Frame(content_frame, bg="#404040", width=1).pack(side=tk.LEFT, fill=tk.Y)
+        console = ConsolePanel(content_frame, backend, stop_event, console_width - 1)
+        console.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def close_window():
         # stop_event lets the stream thread's own cleanup run first if it's
@@ -414,7 +556,7 @@ def run_webcam_window(backend, x=None, y=None):
                     # Decode and resize
                     img = Image.open(io.BytesIO(jpg))
                     # Scale to fit the frame
-                    img.thumbnail((width, height))
+                    img.thumbnail((video_width, height))
 
                     # Use standard PIL.ImageTk
                     from PIL import ImageTk
@@ -487,7 +629,7 @@ def main():
                 x, y = int(args[1]), int(args[2])
             except ValueError:
                 pass
-        run_webcam_window(backend, x, y)
+        run_webcam_window(backend, x, y, show_console=config.get("webcam_console", True))
         return
 
     TrayApp(config).run()

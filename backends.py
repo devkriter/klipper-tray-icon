@@ -73,6 +73,7 @@ def _describe_request_error(e, url, api_key=""):
 class PrinterBackend:
     """Base class. Constructors must not perform network I/O - only start() may."""
     supports_webcam = False
+    supports_console = False
     dashboard_url = None
 
     def start(self):
@@ -90,6 +91,7 @@ class PrinterBackend:
 
 class MoonrakerBackend(PrinterBackend):
     supports_webcam = True
+    supports_console = True
 
     def __init__(self, moonraker_url, api_key=""):
         self.moonraker_url = normalize_moonraker_url(moonraker_url)
@@ -179,6 +181,18 @@ class MoonrakerBackend(PrinterBackend):
         if klippy != "ready":
             return True, f"Connected to {host}, but Klipper is '{klippy}'"
         return True, f"Connected to {host}"
+
+    def get_console_messages(self, count=100):
+        """Recent console lines (what Mainsail's console shows), oldest first:
+        [{"message": str, "time": float, "type": "command" | "response"}].
+        Raises a requests exception if Moonraker can't be reached."""
+        r = requests.get(f"{self.moonraker_url}/server/gcode_store", params={"count": count},
+                         timeout=3, headers=self._headers)
+        r.raise_for_status()
+        return r.json().get("result", {}).get("gcode_store", [])
+
+    def describe_error(self, e):
+        return _describe_request_error(e, self.moonraker_url, self.api_key)
 
     def get_webcam_url(self):
         """Discover webcam URL from Moonraker."""

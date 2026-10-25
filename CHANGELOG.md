@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.0] - 2026-10-25
+### Added
+- Klipper console beside the webcam: the webcam window shows Moonraker's console history
+  (the same lines as Mainsail's console) and follows new lines live. Commands, errors (`!!`)
+  and `//` messages are color-coded. Read-only. Can be turned off in Settings. Klipper only.
+
 ## [1.5.0] - 2026-10-22
 ### Added
 - Settings window (right-click → Settings…) replacing hand-editing `config.json`: printer type,

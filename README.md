@@ -15,6 +15,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   - ⚪ **Gray Ring with red dot**: Offline (can't reach the printer — hover or right-click for why)
 - **Status at a glance**: hover or right-click the icon to see progress, time left, ETA and the
   file being printed.
+- **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
+  video. It can be turned off in Settings.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Settings window**: switch printers, test the connection, change the refresh rate, and turn
   notifications and *Start with Windows* on or off. Changes apply immediately.
@@ -105,6 +107,7 @@ For Klipper/Moonraker (see `config.example.json`):
     "printer_type": "klipper",
     "moonraker_url": "http://your-printer-ip",
     "moonraker_api_key": "",
+    "webcam_console": true,
     "update_interval_seconds": 2,
     "notifications": true
 }

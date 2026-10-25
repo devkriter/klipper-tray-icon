@@ -151,6 +151,7 @@ class SettingsWindow:
         self.var_url = tk.StringVar(value=config.get("moonraker_url", "http://mainsail.local"))
         self.var_api_key = tk.StringVar(value=config.get("moonraker_api_key", ""))
         self.var_show_key = tk.BooleanVar(value=False)
+        self.var_console = tk.BooleanVar(value=config.get("webcam_console", True))
         self.var_ip = tk.StringVar(value=config.get("bambu_ip", ""))
         self.var_serial = tk.StringVar(value=config.get("bambu_serial", ""))
         self.var_code = tk.StringVar(value=config.get("bambu_access_code", ""))
@@ -213,6 +214,8 @@ class SettingsWindow:
         ttk.Checkbutton(self.klipper_frame, text="Show", variable=self.var_show_key,
                         command=self._toggle_key).grid(row=2, column=2, padx=(8, 0))
         self._hint(self.klipper_frame, 3, "Optional — leave blank unless Moonraker asks for one.")
+        ttk.Checkbutton(self.klipper_frame, text="Show the Klipper console next to the webcam",
+                        variable=self.var_console).grid(row=4, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
         self.bambu_frame = ttk.Frame(outer)
         self.bambu_frame.columnconfigure(1, weight=1)
@@ -327,6 +330,7 @@ class SettingsWindow:
                 return None
             config["moonraker_url"] = url
             config["moonraker_api_key"] = self.var_api_key.get().strip()
+            config["webcam_console"] = bool(self.var_console.get())
         else:
             ip = self.var_ip.get().strip()
             serial = self.var_serial.get().strip().upper()

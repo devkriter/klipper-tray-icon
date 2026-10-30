@@ -10,6 +10,7 @@ import os
 import subprocess
 import ctypes
 import queue
+import re
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -193,6 +194,7 @@ class TrayApp:
         self.icon = None
         self._config_mtime = self._read_config_mtime()
         self._settings_proc = None
+        self._webcam = None  # WebcamPopupHelper, started in run()
         self._last_drawn = None
         # Last status we actually heard from the printer. Notifications
         # compare against this so a brief network drop mid-print doesn't
@@ -231,9 +233,17 @@ class TrayApp:
 
     # ---- actions ------------------------------------------------------
 
+    def _start_webcam_helper(self):
+        if self.backend.supports_webcam:
+            self._webcam = WebcamPopupHelper(self.config)
+            self._webcam.start()
+
     def on_show_webcam(self, icon, item):
         mx, my = get_mouse_pos()
-        subprocess.Popen(self_command("--webcam", str(mx), str(my)))
+        if self._webcam is None:
+            self._start_webcam_helper()
+        if self._webcam is not None:
+            self._webcam.show(mx, my)
 
     def on_open_browser(self, icon, item):
         if self.backend.dashboard_url:
@@ -254,6 +264,8 @@ class TrayApp:
         self.shutdown_event.set()
         icon.visible = False
         icon.stop()
+        if self._webcam is not None:
+            self._webcam.stop()
         self.backend.stop()
         os._exit(0)
 
@@ -281,6 +293,11 @@ class TrayApp:
         self.backend = backends.create_backend(config, application_path)
         self.backend.start()
         old.stop()
+        # The popup helper has the old settings baked in; replace it.
+        if self._webcam is not None:
+            self._webcam.stop()
+            self._webcam = None
+        self._start_webcam_helper()
         self.status = backends.PrinterStatus(state="standby", progress=0.0, message="Connecting...")
         self._last_online = self.status
         self._last_drawn = None
@@ -327,23 +344,31 @@ class TrayApp:
     def run(self):
         autostart.refresh_path()
         self.backend.start()
+        # Start the webcam popup now, hidden, so clicks only have to show it.
+        self._start_webcam_helper()
         self.icon = pystray.Icon("KlipperTray", create_tray_icon("standby", 0.0),
                                  "Connecting...", self.build_menu())
         self.icon.run(setup=self.update_loop)
 
 
+# e.g. "B:109.3 /110.0 T0:230.6 /250.0" (also T:, T1:, C: chamber, ...)
+TEMP_REPORT_RE = re.compile(r"^(?:ok\s+)?(?:[A-Z]\d*:\s*-?\d+(?:\.\d+)?\s*/\s*-?\d+(?:\.\d+)?\s*)+$")
+
+
 class ConsolePanel:
     """Read-only Klipper console (Moonraker's gcode store) shown beside the
-    webcam. A background thread polls Moonraker; the Tk side drains a queue
-    so all widget updates stay on the Tk thread."""
+    webcam. A background thread polls Moonraker while the popup is visible
+    (plus once at startup, so history is ready before the first click); the
+    Tk side drains a queue so all widget updates stay on the Tk thread."""
 
     POLL_SECONDS = 1.0
     MAX_LINES = 500
 
-    def __init__(self, parent, backend, stop_event, width):
+    def __init__(self, parent, backend, width):
         self.backend = backend
-        self.stop_event = stop_event
         self.queue = queue.Queue()
+        self._active = threading.Event()  # set while the popup is visible
+        self._wake = threading.Event()    # poll right now instead of in a second
 
         self.frame = tk.Frame(parent, bg="#141414", width=width)
         self.frame.pack_propagate(False)
@@ -366,8 +391,10 @@ class ConsolePanel:
         self.text.tag_configure("command", foreground="#6cb6ff")
         self.text.tag_configure("echo", foreground="#9a9a9a")
         self.text.tag_configure("error", foreground="#ff6b6b")
+        self.text.tag_configure("temp", foreground="#e3b341")
         self.text.tag_configure("status", foreground="#8a8a8a", font=("Segoe UI", 9, "italic"))
         self.text.configure(state=tk.DISABLED)
+        self._temp_line_open = False  # is the last line a temperature report?
         self._append_status("Loading console…")
         self._has_lines = False
 
@@ -376,10 +403,21 @@ class ConsolePanel:
 
     # -- background thread --
 
+    def resume(self):
+        self._active.set()
+        self._wake.set()
+
+    def pause(self):
+        self._active.clear()
+
     def _poll_loop(self):
         last_time = 0.0
         last_error = None
-        while not self.stop_event.is_set():
+        first = True
+        while True:
+            if not first:
+                self._active.wait()
+            first = False
             try:
                 entries = self.backend.get_console_messages()
                 new = [e for e in entries if e.get("time", 0) > last_time]
@@ -394,7 +432,8 @@ class ConsolePanel:
                 if message != last_error:
                     last_error = message
                     self.queue.put(("error", message))
-            self.stop_event.wait(self.POLL_SECONDS)
+            self._wake.wait(self.POLL_SECONDS)
+            self._wake.clear()
 
     # -- Tk thread --
 
@@ -408,8 +447,7 @@ class ConsolePanel:
                     self._append_status(f"Console unavailable: {payload}")
         except queue.Empty:
             pass
-        if not self.stop_event.is_set():
-            self.frame.after(200, self._drain)
+        self.frame.after(100, self._drain)
 
     def _at_bottom(self):
         return self.text.yview()[1] >= 0.999
@@ -433,8 +471,21 @@ class ConsolePanel:
                 tag = "error"
             elif message.startswith("//"):
                 tag = "echo"
+            elif TEMP_REPORT_RE.match(message):
+                tag = "temp"
             else:
                 tag = None
+
+            # Klipper prints a temperature report every second while it waits
+            # to heat (M109/M190). Keep just one line and update it in place.
+            if tag == "temp":
+                if self._temp_line_open:
+                    self.text.delete("temp_start", "end-1c")
+                else:
+                    self.text.mark_set("temp_start", "end-1c")
+                    self.text.mark_gravity("temp_start", tk.LEFT)
+            self._temp_line_open = tag == "temp"
+
             self.text.insert(tk.END, stamp + "  ", ("line", "time"))
             self.text.insert(tk.END, message + "\n", ("line", tag) if tag else "line")
         self._trim()
@@ -447,6 +498,7 @@ class ConsolePanel:
         self.text.configure(state=tk.NORMAL)
         self.text.insert(tk.END, message + "\n", "status")
         self.text.configure(state=tk.DISABLED)
+        self._temp_line_open = False
         if follow:
             self.text.see(tk.END)
 
@@ -454,6 +506,7 @@ class ConsolePanel:
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
         self.text.configure(state=tk.DISABLED)
+        self._temp_line_open = False
 
     def _trim(self):
         lines = int(self.text.index("end-1c").split(".")[0])
@@ -461,148 +514,340 @@ class ConsolePanel:
             self.text.delete("1.0", f"{lines - self.MAX_LINES}.0")
 
 
-def run_webcam_window(backend, x=None, y=None, show_console=False):
-    """Run the webcam viewer in a Tkinter window."""
-    root = tk.Tk()
-    root.title("Printer Webcam")
+class WebcamPopup:
+    """The webcam popup. Normally lives in a background helper process that
+    the tray starts once and keeps hidden, so a click only has to un-hide a
+    window that already exists (no process start, no imports, no window
+    creation). While hidden it keeps a recent snapshot ready, which is shown
+    the instant the popup opens and replaced as soon as live video arrives.
 
-    # "Popup" style dimensions
-    video_width = 640
-    console_width = 340 if show_console and backend.supports_console else 0
-    width = video_width + console_width
-    height = 480
+    Commands arrive on stdin, one per line: "show X Y", "hide", "quit".
+    """
 
-    # Configure window style
-    root.configure(bg="#202020") # Dark grey background
-    root.overrideredirect(True)  # Remove OS title bar
-    root.attributes("-topmost", True) # Keep on top
-    
-    # Calculate Position
-    if x is not None and y is not None:
-        # Default to bottom-right alignment with cursor (like system tray)
-        # Mouse is at (x, y). Window goes above-center or above-left?
-        # Windows tray icons are usually bottom-right of screen.
-        # So we want the window's bottom-right (or center) to point to x,y.
-        
-        # Position: (x - width/2, y - height - 10) -> Centered above cursor
-        # Ensure it fits on screen
-        screen_w = root.winfo_screenwidth()
-        screen_h = root.winfo_screenheight()
-        
-        pos_x = int(x - (width / 2))
-        pos_y = int(y - height - 20) # 20px padding above cursor
-        
-        # Clamp to screen
-        pos_x = max(0, min(screen_w - width, pos_x))
-        pos_y = max(0, min(screen_h - height, pos_y))
-        
-        root.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
-    else:
-        root.geometry(f"{width}x{height}")
+    VIDEO_WIDTH = 640
+    HEIGHT = 480
+    CONSOLE_WIDTH = 340
+    SNAPSHOT_REFRESH_SECONDS = 20
+    # A tray click while the popup is open first takes focus away (hiding
+    # it), then sends "show". Treat that pair as "toggle closed".
+    TOGGLE_WINDOW_SECONDS = 0.4
 
-    # Inner frame for border effect
-    # Main window is #202020. We can add a lighter/darker border.
-    # Actually, let's make the root the border color, and an inner frame the content.
-    border_color = "#404040"
-    root.configure(bg=border_color)
-    
-    content_frame = tk.Frame(root, bg="#000000")
-    content_frame.pack(fill=tk.BOTH, expand=True, padx=1, pady=1) # 1px border
-    
-    video_frame = tk.Frame(content_frame, bg="black", width=video_width)
-    video_frame.pack_propagate(False)
-    video_frame.pack(side=tk.LEFT, fill=tk.Y)
-    lbl_video = tk.Label(video_frame, bg="black")
-    lbl_video.pack(fill=tk.BOTH, expand=True)
+    def __init__(self, backend, show_console=False, one_shot=False):
+        self.backend = backend
+        self.one_shot = one_shot  # legacy --webcam: exit instead of hiding
+        self.visible = False
+        self._session = None      # threading.Event, set to end the current stream
+        self._session_id = 0
+        self._got_live = False
+        self._cached = None       # (PIL image, datetime) - last frame we've seen
+        self._frame_slot = None   # newest (session_id, kind, PIL image) for the Tk thread
+        self._slot_lock = threading.Lock()
+        self._commands = queue.Queue()
+        self._hidden_at = 0.0
 
-    # Threaded frame fetcher
-    stop_event = threading.Event()
+        self.root = root = tk.Tk()
+        root.withdraw()
+        root.title("Printer Webcam")
+        root.overrideredirect(True)  # no OS title bar
+        root.attributes("-topmost", True)
 
-    if console_width:
-        tk.Frame(content_frame, bg="#404040", width=1).pack(side=tk.LEFT, fill=tk.Y)
-        console = ConsolePanel(content_frame, backend, stop_event, console_width - 1)
-        console.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        console_width = self.CONSOLE_WIDTH if show_console and backend.supports_console else 0
+        self.width = self.VIDEO_WIDTH + console_width
 
-    def close_window():
-        # stop_event lets the stream thread's own cleanup run first if it's
-        # quick, but backend.stop() is the real guarantee - it force-stops
-        # any camera bridge process (e.g. go2rtc) this window started, since
-        # os._exit() below won't run the stream thread's "finally" cleanup.
-        stop_event.set()
+        border_color = "#404040"
+        root.configure(bg=border_color)
+        content = tk.Frame(root, bg="#000000")
+        content.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)  # 1px border
+
+        video_frame = tk.Frame(content, bg="black", width=self.VIDEO_WIDTH)
+        video_frame.pack_propagate(False)
+        video_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.lbl_video = tk.Label(video_frame, bg="black", fg="white", text="Connecting...")
+        self.lbl_video.pack(fill=tk.BOTH, expand=True)
+        # Shown over a snapshot until live video takes over.
+        self.badge = tk.Label(video_frame, bg="#202020", fg="#d0d0d0", font=("Segoe UI", 8), padx=8, pady=3)
+
+        self.console = None
+        if console_width:
+            tk.Frame(content, bg=border_color, width=1).pack(side=tk.LEFT, fill=tk.Y)
+            self.console = ConsolePanel(content, backend, console_width - 1)
+            self.console.frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        close_btn = tk.Button(root, text="×", command=self.hide,
+                              bg="#202020", fg="white", bd=0, font=("Arial", 12),
+                              activebackground="#cc0000", activeforeground="white")
+        close_btn.place(x=self.width - 30, y=1, width=28, height=24)
+
+        root.bind("<Escape>", lambda e: self.hide())
+        root.bind("<FocusOut>", self._on_focus_out)
+
+        threading.Thread(target=self._snapshot_loop, daemon=True).start()
+        root.after(15, self._tick)
+
+    # ---- commands (Tk thread) -------------------------------------------
+
+    def listen_stdin(self):
+        def read():
+            for line in sys.stdin:
+                self._commands.put(line.split())
+            self._commands.put(["quit"])  # tray went away
+        threading.Thread(target=read, daemon=True).start()
+
+    def _tick(self):
         try:
-            backend.stop()
+            while True:
+                self._handle(self._commands.get_nowait())
+        except queue.Empty:
+            pass
+        with self._slot_lock:
+            slot, self._frame_slot = self._frame_slot, None
+        if slot is not None:
+            self._show_frame(*slot)
+        self.root.after(15, self._tick)
+
+    def _handle(self, cmd):
+        if not cmd:
+            return
+        if cmd[0] == "show":
+            x = y = None
+            if len(cmd) >= 3:
+                try:
+                    x, y = int(cmd[1]), int(cmd[2])
+                except ValueError:
+                    pass
+            if time.monotonic() - self._hidden_at < self.TOGGLE_WINDOW_SECONDS:
+                return  # this click is what just closed it
+            self.show(x, y)
+        elif cmd[0] == "hide":
+            self.hide()
+        elif cmd[0] == "quit":
+            self.quit()
+
+    # ---- show / hide ----------------------------------------------------
+
+    def show(self, x=None, y=None):
+        root = self.root
+        if x is not None and y is not None:
+            # Centered above the cursor (the tray is usually bottom-right),
+            # clamped to the screen.
+            pos_x = int(x - self.width / 2)
+            pos_y = int(y - self.HEIGHT - 20)
+            pos_x = max(0, min(root.winfo_screenwidth() - self.width, pos_x))
+            pos_y = max(0, min(root.winfo_screenheight() - self.HEIGHT, pos_y))
+            root.geometry(f"{self.width}x{self.HEIGHT}+{pos_x}+{pos_y}")
+        else:
+            root.geometry(f"{self.width}x{self.HEIGHT}")
+
+        # Paint the cached frame before the window appears, so the very first
+        # thing on screen is a picture rather than "Connecting...".
+        if self._cached is not None:
+            image, taken = self._cached
+            self._set_image(image)
+            self._set_badge(f"Snapshot from {taken:%H:%M:%S} · connecting…")
+        else:
+            self._set_badge(None)
+            self.lbl_video.config(image="", text="Connecting...")
+            self.lbl_video.image = None
+
+        self.visible = True
+        root.deiconify()
+        root.lift()
+        root.focus_force()
+        try:
+            ctypes.windll.user32.SetForegroundWindow(ctypes.windll.user32.GetParent(root.winfo_id()))
+        except Exception:
+            pass
+
+        if self.console is not None:
+            self.console.resume()
+        self._start_session()
+
+    def hide(self):
+        if self.one_shot:
+            self.quit()
+        if not self.visible:
+            return
+        self.visible = False
+        self._hidden_at = time.monotonic()
+        self.root.withdraw()
+        if self.console is not None:
+            self.console.pause()
+        self._end_session()
+
+    def quit(self):
+        self._end_session()
+        try:
+            self.backend.stop()
         except Exception:
             pass
         os._exit(0)
 
-    # Add a close button overlay or behavior
-    close_btn = tk.Button(root, text="×", command=close_window,
-                          bg="#202020", fg="white", bd=0, font=("Arial", 12),
-                          activebackground="#cc0000", activeforeground="white")
-    close_btn.place(x=width-30, y=1, width=28, height=24)
+    def _on_focus_out(self, event):
+        if self.visible and self.root.focus_displayof() is None:
+            self.hide()
 
-    # Show something immediately - first Bambu use may include a one-time
-    # go2rtc download before any frame arrives.
-    lbl_video.config(text="Connecting...", fg="white")
+    # ---- video ------------------------------------------------------------
 
-    def stream_loop():
+    def _start_session(self):
+        self._end_session()
+        self._session_id += 1
+        session_id = self._session_id
+        stop = self._session = threading.Event()
+        self._got_live = False
+        threading.Thread(target=self._stream_loop, args=(session_id, stop), daemon=True).start()
+        # A single snapshot usually arrives well before the stream's first
+        # frame; show it in the meantime.
+        threading.Thread(target=self._quick_snapshot, args=(session_id,), daemon=True).start()
+
+    def _end_session(self):
+        if self._session is not None:
+            self._session.set()
+            # The stream thread notices within a frame and its cleanup releases
+            # the camera (Bambu: stops go2rtc, as the printer only allows one
+            # viewer at a time).
+            self._session = None
+
+    def _decode(self, jpg):
+        img = Image.open(io.BytesIO(jpg))
+        img.thumbnail((self.VIDEO_WIDTH, self.HEIGHT))
+        img.load()
+        return img
+
+    def _post(self, session_id, kind, image):
+        with self._slot_lock:
+            current = self._frame_slot
+            # Never let a snapshot replace a live frame that's waiting.
+            if kind == "snapshot" and current is not None and current[1] == "live":
+                return
+            self._frame_slot = (session_id, kind, image)
+
+    def _stream_loop(self, session_id, stop):
         got_frame = False
         try:
-            for jpg in backend.iter_webcam_frames(stop_event):
-                if stop_event.is_set():
+            for jpg in self.backend.iter_webcam_frames(stop):
+                if stop.is_set():
                     break
-                got_frame = True
                 try:
-                    # Decode and resize
-                    img = Image.open(io.BytesIO(jpg))
-                    # Scale to fit the frame
-                    img.thumbnail((video_width, height))
-
-                    # Use standard PIL.ImageTk
-                    from PIL import ImageTk
-                    tk_img = ImageTk.PhotoImage(img)
-
-                    def update_ui(image_ref):
-                        try:
-                            if root.winfo_exists():
-                                lbl_video.config(image=image_ref, text="")
-                                lbl_video.image = image_ref # Keep reference
-                        except: pass
-
-                    root.after(0, update_ui, tk_img)
-                except Exception as e:
-                    pass # Frame error
-        except Exception as e:
-            pass
-            # print(f"Stream error: {e}")
-
-        if not got_frame and not stop_event.is_set():
-            def show_unavailable():
-                try:
-                    if root.winfo_exists():
-                        lbl_video.config(text="Camera unavailable", fg="white")
+                    image = self._decode(jpg)
                 except Exception:
-                    pass
-            root.after(0, show_unavailable)
+                    continue
+                got_frame = True
+                self._post(session_id, "live", image)
+        except Exception:
+            pass
+        if not got_frame and not stop.is_set():
+            self._post(session_id, "unavailable", None)
 
-    t = threading.Thread(target=stream_loop, daemon=True)
-    t.start()
-    
-    # Close on Escape or click outside?
-    root.bind("<Escape>", lambda e: close_window())
+    def _quick_snapshot(self, session_id):
+        jpg = self.backend.get_webcam_snapshot(timeout=2)
+        if jpg:
+            try:
+                self._post(session_id, "snapshot", self._decode(jpg))
+            except Exception:
+                pass
 
-    # For click-away close, we need a focus out handler
-    def on_focus_out(event):
-        # Small delay to allow focus transfer to check
-        # This can be annoying if it closes when you click the window itself (if focus handling is weird)
-        # But for a popup, losing focus normally means close.
-        if root.focus_displayof() is None:
-             close_window()
-             
-    root.bind("<FocusOut>", on_focus_out)
-    root.focus_force() # Grab focus initially
-    
-    root.mainloop()
+    def _snapshot_loop(self):
+        """While hidden, keep the cached picture reasonably fresh (Klipper
+        only - for Bambu a snapshot means starting go2rtc, so the cache just
+        holds the last frame seen)."""
+        while True:
+            if not self.visible:
+                jpg = self.backend.get_webcam_snapshot(timeout=3)
+                if jpg:
+                    try:
+                        self._post(None, "cache", self._decode(jpg))
+                    except Exception:
+                        pass
+            time.sleep(self.SNAPSHOT_REFRESH_SECONDS)
+
+    def _show_frame(self, session_id, kind, image):
+        if kind == "cache":
+            self._cached = (image, datetime.datetime.now())
+            return
+        if session_id != self._session_id or not self.visible:
+            return  # from a stream that has since been closed
+        if kind == "live":
+            self._got_live = True
+            self._cached = (image, datetime.datetime.now())
+            self._set_image(image)
+            self._set_badge(None)
+        elif kind == "snapshot":
+            if self._got_live:
+                return
+            self._cached = (image, datetime.datetime.now())
+            self._set_image(image)
+            self._set_badge("Snapshot · connecting to live video…")
+        elif kind == "unavailable":
+            if self._cached is not None:
+                self._set_badge("Live video unavailable · showing last snapshot")
+            else:
+                self.lbl_video.config(image="", text="Camera unavailable")
+                self.lbl_video.image = None
+
+    def _set_image(self, image):
+        from PIL import ImageTk
+        photo = ImageTk.PhotoImage(image)
+        self.lbl_video.config(image=photo, text="")
+        self.lbl_video.image = photo  # keep a reference
+
+    def _set_badge(self, text):
+        if text:
+            self.badge.config(text=text)
+            self.badge.place(x=8, rely=1.0, y=-8, anchor="sw")
+        else:
+            self.badge.place_forget()
+
+    def run(self):
+        self.root.mainloop()
+
+
+class WebcamPopupHelper:
+    """Tray-side handle on the background webcam popup process."""
+
+    def __init__(self, config):
+        self.config = config
+        self.proc = None
+
+    def start(self):
+        self.proc = subprocess.Popen(self_command("--webcam-helper"), stdin=subprocess.PIPE)
+
+    def _send(self, line):
+        if self.proc is None or self.proc.poll() is not None:
+            self.start()
+        try:
+            self.proc.stdin.write((line + "\n").encode())
+            self.proc.stdin.flush()
+        except OSError:
+            # Helper died between the check and the write - start a fresh one.
+            self.start()
+            self.proc.stdin.write((line + "\n").encode())
+            self.proc.stdin.flush()
+
+    def show(self, x, y):
+        if self.proc is not None and self.proc.poll() is None:
+            # Windows only lets the app the user just clicked bring a window
+            # to the front; pass that permission on to the helper.
+            try:
+                ctypes.windll.user32.AllowSetForegroundWindow(self.proc.pid)
+            except Exception:
+                pass
+        self._send(f"show {x} {y}")
+
+    def hide(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self._send("hide")
+
+    def stop(self):
+        proc, self.proc = self.proc, None
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write(b"quit\n")
+            proc.stdin.close()
+            proc.wait(timeout=2)
+        except Exception:
+            proc.kill()
+
 
 def main():
     args = sys.argv[1:]
@@ -618,18 +863,26 @@ def main():
             return
         config = read_config()
 
-    if args[:1] == ["--webcam"]:
+    if args[:1] in (["--webcam"], ["--webcam-helper"]):
         backend = backends.create_backend(config, application_path)
         if not backend.supports_webcam:
             print("Webcam not supported for this printer type")
             sys.exit(1)
-        x, y = None, None
-        if len(args) >= 3:
-            try:
-                x, y = int(args[1]), int(args[2])
-            except ValueError:
-                pass
-        run_webcam_window(backend, x, y, show_console=config.get("webcam_console", True))
+        one_shot = args[0] == "--webcam"
+        popup = WebcamPopup(backend, show_console=config.get("webcam_console", True), one_shot=one_shot)
+        if one_shot:
+            # Standalone popup (handy for testing): show now, exit on close.
+            x = y = None
+            if len(args) >= 3:
+                try:
+                    x, y = int(args[1]), int(args[2])
+                except ValueError:
+                    pass
+            popup.root.after(0, popup.show, x, y)
+        else:
+            # Started hidden by the tray, which sends "show" on each click.
+            popup.listen_stdin()
+        popup.run()
         return
 
     TrayApp(config).run()

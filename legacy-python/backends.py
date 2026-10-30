@@ -88,6 +88,10 @@ class PrinterBackend:
     def iter_webcam_frames(self, stop_event):
         raise NotImplementedError
 
+    def get_webcam_snapshot(self, timeout=2):
+        """A single JPEG, if the printer can serve one cheaply; else None."""
+        return None
+
 
 class MoonrakerBackend(PrinterBackend):
     supports_webcam = True
@@ -194,41 +198,63 @@ class MoonrakerBackend(PrinterBackend):
     def describe_error(self, e):
         return _describe_request_error(e, self.moonraker_url, self.api_key)
 
-    def get_webcam_url(self):
-        """Discover webcam URL from Moonraker."""
+    def _absolute(self, path):
+        if path.startswith("http"):
+            return path
+        if path.startswith("/"):
+            return f"{self.moonraker_url}{path}"
+        return f"{self.moonraker_url}/{path}"
+
+    def _webcam_urls(self):
+        """(stream_url, snapshot_url) for the first enabled MJPEG webcam.
+        Cached after the first successful lookup - the webcam list rarely
+        changes, and skipping the round trip makes the popup faster."""
+        cached = getattr(self, "_cached_webcam_urls", None)
+        if cached:
+            return cached
+        default = (f"{self.moonraker_url}/webcam/?action=stream",
+                   f"{self.moonraker_url}/webcam/?action=snapshot")
         try:
             url = f"{self.moonraker_url}/server/webcams/list"
             response = requests.get(url, timeout=2, headers=self._headers)
             response.raise_for_status()
-            data = response.json()
-            webcams = data.get("result", {}).get("webcams", [])
-
-            if not webcams:
-                # Fallback default
-                return f"{self.moonraker_url}/webcam/?action=stream"
-
-            # Pick first enabled MJPEG stream
-            for cam in webcams:
-                if cam.get("enabled", True) and cam.get("service") in ["mjpegstreamer", "mjpegstreamer-adaptive", "ipstream"]:
-                    stream_path = cam.get("stream_url", "")
-                    if stream_path.startswith("http"):
-                        return stream_path
-                    elif stream_path.startswith("/"):
-                        return f"{self.moonraker_url}{stream_path}"
-                    return f"{self.moonraker_url}/{stream_path}"
-
-            # Fallback if list exists but no suitable match found
-            return f"{self.moonraker_url}/webcam/?action=stream"
-
+            webcams = response.json().get("result", {}).get("webcams", [])
         except Exception as e:
             print(f"Error fetching webcam list: {e}")
-            return f"{self.moonraker_url}/webcam/?action=stream"
+            return default  # not cached, so the next call retries
+
+        urls = default
+        for cam in webcams:
+            if cam.get("enabled", True) and cam.get("service") in ["mjpegstreamer", "mjpegstreamer-adaptive", "ipstream"]:
+                stream = self._absolute(cam.get("stream_url", ""))
+                snapshot = cam.get("snapshot_url") or ""
+                snapshot = self._absolute(snapshot) if snapshot else stream.replace("action=stream", "action=snapshot")
+                urls = (stream, snapshot)
+                break
+        self._cached_webcam_urls = urls
+        return urls
+
+    def _headers_for(self, url):
+        # Don't hand the key to a camera hosted somewhere else.
+        return self._headers if url.startswith(self.moonraker_url) else None
+
+    def get_webcam_url(self):
+        return self._webcam_urls()[0]
+
+    def get_webcam_snapshot(self, timeout=2):
+        """One JPEG from the webcam, or None. Much quicker than waiting for
+        the stream's first frame, so the popup can show it straight away."""
+        url = self._webcam_urls()[1]
+        try:
+            r = requests.get(url, timeout=timeout, headers=self._headers_for(url))
+            r.raise_for_status()
+            return r.content if r.content[:2] == b"\xff\xd8" else None
+        except Exception:
+            return None
 
     def iter_webcam_frames(self, stop_event):
         url = self.get_webcam_url()
-        # Don't hand the key to a camera hosted somewhere else.
-        headers = self._headers if url.startswith(self.moonraker_url) else None
-        yield from _iter_http_mjpeg_frames(url, stop_event, headers)
+        yield from _iter_http_mjpeg_frames(url, stop_event, self._headers_for(url))
 
 
 # Bambu gcode_state -> this app's common state vocabulary

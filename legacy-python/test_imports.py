@@ -77,6 +77,11 @@ for state in ("printing", "paused", "complete", "error", "offline", "standby"):
         img = klipper_tray.create_tray_icon(state, 0.5, size=size)
         assert img.size == (size, size)
 
+assert klipper_tray.TEMP_REPORT_RE.match("B:109.3 /110.0 T0:230.6 /250.0")
+assert klipper_tray.TEMP_REPORT_RE.match("T:215.0 /215.0")
+assert not klipper_tray.TEMP_REPORT_RE.match("// Klipper state: Ready")
+assert not klipper_tray.TEMP_REPORT_RE.match("M109 S250")
+
 print("Tray / settings helpers OK.")
 print("Test complete.")
 exit(0)

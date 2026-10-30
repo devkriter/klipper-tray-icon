@@ -117,6 +117,7 @@ For Klipper/Moonraker (see `config.example.json`):
     "moonraker_url": "http://your-printer-ip",
     "moonraker_api_key": "",
     "webcam_console": true,
+    "console_hide_timelapse": true,
     "update_interval_seconds": 2,
     "notifications": true
 }
@@ -133,6 +134,9 @@ For Bambu Lab (see `config.example.bambu.json`):
     "notifications": true
 }
 ```
+
+`console_hide_timelapse` hides the commands moonraker-timelapse sends on every frame from the
+console (Klipper's responses always show).
 
 `moonraker_api_key` is optional. Moonraker lets devices on your home network in without one
 (via `trusted_clients` in `moonraker.conf`), so you only need it if this PC reaches the printer

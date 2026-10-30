@@ -47,7 +47,7 @@ public partial class WebcamPopup : Window
     // Reused for every raw frame of the same size (Bambu), instead of a new bitmap per frame.
     private WriteableBitmap? _video;
 
-    public WebcamPopup(IPrinterBackend backend, bool showConsole)
+    public WebcamPopup(IPrinterBackend backend, bool showConsole, bool hideTimelapse = true)
     {
         InitializeComponent();
         _backend = backend;
@@ -59,7 +59,7 @@ public partial class WebcamPopup : Window
         {
             ConsoleColumn.Width = new GridLength(ConsoleWidth);
             ConsolePanel.Visibility = Visibility.Visible;
-            _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+            _console = new ConsoleFeed(backend, hideTimelapse, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
         }
 
         Deactivated += (_, _) => HideFromFocusLoss();
@@ -391,6 +391,19 @@ public sealed class ConsoleLine
         return new ConsoleLine { Time = time, Text = StripPrefix(raw, "//") };
     }
 
+    // Macros from moonraker-timelapse (TIMELAPSE_TAKE_FRAME, _TIMELAPSE_NEW_FRAME,
+    // SET_GCODE_VARIABLE MACRO=TIMELAPSE_..., HYPERLAPSE ...).
+    private static readonly System.Text.RegularExpressions.Regex TimelapseMacro =
+        new(@"\b_?(TIMELAPSE|HYPERLAPSE)\w*", System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                                               System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// A command sent by the timelapse macros on every frame. Only commands
+    /// are matched: Klipper's responses (including timelapse errors) always show.
+    /// </summary>
+    internal static bool IsTimelapseCommand(ConsoleEntry entry) =>
+        entry.Type == "command" && TimelapseMacro.IsMatch(entry.Message);
+
     /// <summary>
     /// Klipper marks every line of a response with "// " (or "!! " for
     /// errors), including each line of multi-line messages. The colour already
@@ -436,6 +449,7 @@ internal sealed class ConsoleFeed
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly IPrinterBackend _backend;
+    private readonly bool _hideTimelapse;
     private readonly ObservableCollection<ConsoleLine> _lines = new();
     private readonly System.Windows.Controls.ScrollViewer _scroll;
     private readonly System.Windows.Threading.Dispatcher _ui;
@@ -443,10 +457,11 @@ internal sealed class ConsoleFeed
     private volatile bool _wake = true;
     private bool _hasLines;
 
-    public ConsoleFeed(IPrinterBackend backend, System.Windows.Controls.ItemsControl list,
+    public ConsoleFeed(IPrinterBackend backend, bool hideTimelapse, System.Windows.Controls.ItemsControl list,
                        System.Windows.Controls.ScrollViewer scroll, System.Windows.Threading.Dispatcher ui, CancellationToken ct)
     {
         _backend = backend;
+        _hideTimelapse = hideTimelapse;
         _scroll = scroll;
         _ui = ui;
         list.ItemsSource = _lines;
@@ -481,6 +496,8 @@ internal sealed class ConsoleFeed
                         fresh.Add(e);
                 if (fresh.Count > 0)
                     lastTime = fresh[^1].Time;
+                if (_hideTimelapse)
+                    fresh.RemoveAll(ConsoleLine.IsTimelapseCommand);
                 lastError = null;
                 if (fresh.Count > 0 || !_hasLines)
                     await _ui.InvokeAsync(() => ShowEntries(fresh));

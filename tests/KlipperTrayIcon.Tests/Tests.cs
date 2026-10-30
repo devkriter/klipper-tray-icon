@@ -221,6 +221,27 @@ public class ConsoleLineTests
         Assert.True(line.HasTime);
     }
 
+    [Theory]
+    [InlineData("SET_GCODE_VARIABLE MACRO=TIMELAPSE_TAKE_FRAME VARIABLE=takingframe VALUE=False", "command", true)]
+    [InlineData("TIMELAPSE_TAKE_FRAME", "command", true)]
+    [InlineData("_TIMELAPSE_NEW_FRAME HYPERLAPSE=FALSE", "command", true)]
+    [InlineData("HYPERLAPSE ACTION=START CYCLE=30", "command", true)]
+    [InlineData("timelapse_take_frame", "command", true)]
+    [InlineData("SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=x VALUE=1", "command", false)]
+    [InlineData("G28", "command", false)]
+    [InlineData("// TIMELAPSE: frame capture failed", "response", false)] // responses always show
+    [InlineData("!! Unknown command: TIMELAPSE_TAKE_FRAME", "response", false)]
+    public void RecognisesTimelapseCommands(string message, string type, bool expected) =>
+        Assert.Equal(expected, ConsoleLine.IsTimelapseCommand(new ConsoleEntry(message, 1, type)));
+
+    [Fact]
+    public void ConfigDefaultsToHidingTimelapse()
+    {
+        Assert.True(new AppConfig().ConsoleHideTimelapse);
+        var off = JsonSerializer.Deserialize<AppConfig>("""{"console_hide_timelapse": false}""", ConfigStore.JsonOptions)!;
+        Assert.False(off.ConsoleHideTimelapse);
+    }
+
     [Fact]
     public void MultiLineResponsesLoseEveryMarker()
     {

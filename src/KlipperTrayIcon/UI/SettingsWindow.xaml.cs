@@ -37,6 +37,7 @@ public partial class SettingsWindow : Window
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
+        HideTimelapseCheck.IsChecked = config.ConsoleHideTimelapse;
         IpBox.Text = config.BambuIp;
         SerialBox.Text = config.BambuSerial;
         CodeHidden.Password = config.BambuAccessCode;
@@ -109,6 +110,7 @@ public partial class SettingsWindow : Window
             config.MoonrakerUrl = url;
             config.MoonrakerApiKey = Secret(ApiKeyHidden, ApiKeyVisible);
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
+            config.ConsoleHideTimelapse = HideTimelapseCheck.IsChecked == true;
         }
         else
         {

@@ -52,6 +52,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Text="Address" Style="{StaticResource FieldLabel}" />
@@ -92,8 +93,12 @@
                       Checked="OnShowApiKeyChanged" Unchecked="OnShowApiKeyChanged" />
             <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Optional — leave blank unless Moonraker asks for one." />
-            <CheckBox x:Name="ConsoleCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,8"
+            <CheckBox x:Name="ConsoleCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,4"
                       Content="Show the Klipper console next to the webcam" />
+            <!-- Indented under the console option; only meaningful while it's on. -->
+            <CheckBox x:Name="HideTimelapseCheck" Grid.Row="5" Grid.ColumnSpan="3" Margin="30,0,0,8"
+                      Content="Hide the commands timelapse sends on every frame"
+                      IsEnabled="{Binding IsChecked, ElementName=ConsoleCheck}" />
         </Grid>
 
         <!-- Bambu -->

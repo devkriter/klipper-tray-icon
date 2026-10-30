@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1] - 2026-10-30
+### Added
+- Console option **"Hide the commands timelapse sends on every frame"** (Settings, under the
+  console option; on by default). Hides the repeated `TIMELAPSE_TAKE_FRAME` /
+  `SET_GCODE_VARIABLE MACRO=TIMELAPSE_...` (and hyperlapse) commands. Klipper's responses are
+  never hidden, so timelapse errors still show. Config key: `console_hide_timelapse`.
+
 ## [2.0.0] - 2026-10-30
 ### Changed
 - **Rewritten in C# / .NET 10 (WPF)**, replacing the Python app. Same features and the same

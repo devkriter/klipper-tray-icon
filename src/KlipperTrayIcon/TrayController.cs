@@ -156,7 +156,9 @@ public sealed class TrayController : IDisposable
 
     private void CreatePopup()
     {
-        _popup = _backend.SupportsWebcam ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole) : null;
+        _popup = _backend.SupportsWebcam
+            ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole, _config.ConsoleHideTimelapse)
+            : null;
     }
 
     /// <summary>Switch to new settings without restarting (UI thread).</summary>

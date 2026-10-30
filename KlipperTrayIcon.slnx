@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KlipperTrayIcon/KlipperTrayIcon.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KlipperTrayIcon.Tests/KlipperTrayIcon.Tests.csproj" />
+  </Folder>
+</Solution>

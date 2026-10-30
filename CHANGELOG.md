@@ -1,5 +1,51 @@
 # Changelog
 
+## [2.0.0] - 2026-10-30
+### Changed
+- **Rewritten in C# / .NET 10 (WPF)**, replacing the Python app. Same features and the same
+  `config.json` format; *Start with Windows* carries over from 1.x.
+  - Native Windows 11 look for the settings window (Fluent theme, follows light/dark mode) and a
+    dark-mode tray menu.
+  - Starts in about 0.6 s (was about 1 s).
+  - One process instead of two: the webcam popup is a hidden window inside the app, shown in
+    about 10 ms.
+  - Release is a folder with one `KlipperTrayIcon.exe` and WPF's few native DLLs. The .NET
+    runtime is included, so there's nothing else to install.
+  - **Bambu camera without go2rtc and ffmpeg**: the app now talks RTSPS to the printer itself
+    and decodes the H.264 video with Windows' built-in decoder. The release is ~150 MB smaller
+    unpacked, and live video starts sooner (no helper processes to launch). On Windows "N"
+    editions this needs Microsoft's Media Feature Pack.
+  - The release zip is 66 MB (1.6.0 was 92 MB).
+- Console readability: Klipper's responses (macro output, warnings, `//` lines) are now the
+  brightest text instead of faded gray; the `//` and `!!` markers are dropped; errors are
+  semi-bold red; commands are a softer blue; larger text and a wider panel. Multi-line messages
+  stay aligned under the first line.
+### Added
+- Launching the exe again while it's running opens the webcam popup.
+- `--settings` command-line option opens Settings on startup.
+- Instant webcam popup with a snapshot shown while live video connects, the Klipper console
+  history loaded in advance, temperature reports collapsed into one updating line, and
+  click-the-tray-icon-again to close (these were built for the Python version first, see below).
+- Bambu: partial status updates are merged, so printers that only send changed fields after the
+  first report keep showing the file name and state.
+- Errors are logged to `error.log` next to the exe instead of crashing the app.
+
+### Changed (Python version, never released; carried into 2.0.0)
+- Webcam popup opens almost instantly: about 20 ms instead of about 1 s. The tray now
+  keeps the popup ready in a hidden background process and only shows it on click,
+  instead of starting a new process every time.
+- The popup shows a recent snapshot immediately (marked "Snapshot · connecting to live
+  video…") while the live stream connects, so a picture appears within about 60 ms instead
+  of 0.7 to 1.5 s. For Klipper, the snapshot is refreshed every 20 s while the popup is
+  hidden; for Bambu, it's the last frame you saw.
+- The Klipper console history is loaded in advance, so it's there the moment the popup
+  opens.
+- The webcam address is looked up once and reused instead of on every click.
+- Clicking the tray icon while the popup is open now closes it.
+- Console: the once-a-second temperature reports Klipper prints while heating
+  (e.g. `B:109.3 /110.0 T0:230.6 /250.0`) are collapsed into a single amber line that updates
+  in place, instead of filling the panel.
+
 ## [1.6.0] - 2026-10-25
 ### Added
 - Klipper console beside the webcam: the webcam window shows Moonraker's console history

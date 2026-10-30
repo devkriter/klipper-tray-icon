@@ -11,5 +11,13 @@ go2rtc_cache/
 ffmpeg.exe
 ffmpeg_build.zip
 ffmpeg_extract/
-version_info.txt
-app.ico
+legacy-python/version_info.txt
+legacy-python/app.ico
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+publish/
+tools/

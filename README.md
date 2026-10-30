@@ -26,7 +26,11 @@ The icon updates dynamically to show a circular progress bar corresponding to th
     "LAN Only Mode" is not required).
 - **Guided setup**: a welcome window asks for your printer details on first run, with a
   *Test connection* button.
-- **Portable**: Unzip and run - no installation.
+- **Instant webcam popup**: left-click the tray icon. A recent snapshot appears immediately while
+  the live stream connects.
+- **Native Windows app**: built with C# / .NET and the Windows 11 look, follows light/dark mode.
+- **Portable**: Unzip and run - no installation, nothing else to install (the .NET runtime is
+  included).
 
 ## Bambu Lab Support
 
@@ -52,17 +56,14 @@ Limitations:
 ### Webcam / Camera
 
 - **X1 / X1C / X1E / X2D / P2S / H2D / H2C / H2S**: supported. These printers expose their
-  camera as an encrypted RTSPS stream; this app bundles [go2rtc](https://github.com/AlexxIT/go2rtc)
-  (MIT licensed) plus a static [ffmpeg](https://ffmpeg.org) build (LGPL) to decode it locally and
-  re-display it as a live feed, using the same IP and Access Code entered during setup — no extra
-  configuration needed. Both are only started while the "Show Webcam" popup is open, since the
-  printer only allows **one** camera client at a time — close Bambu Studio/Bambu Handy first if
-  the feed shows "Camera unavailable".
+  camera as an encrypted RTSPS stream (H.264 video); the app receives it itself and decodes it
+  with the H.264 decoder built into Windows, using the same IP and Access Code entered during
+  setup — no extra tools or configuration needed. The camera is only connected while the
+  "Show Webcam" popup is open, since the printer only allows **one** camera client at a time —
+  close Bambu Studio/Bambu Handy first if the feed shows "Camera unavailable". (Windows "N"
+  editions need Microsoft's free Media Feature Pack for the decoder.)
 - **P1P / P1S / A1 / A1 mini**: not yet supported (these models use a different local camera
   protocol). "Show Webcam" will show "Camera unavailable" on these printers.
-- When run from source, the first "Show Webcam" click downloads and caches `go2rtc.exe` (~19MB)
-  and `ffmpeg.exe` (~110MB) into a `go2rtc_cache` folder next to `config.json`. The release
-  zip already ships both next to `KlipperTrayIcon.exe`, so no download happens for end users.
 
 ## Installation
 
@@ -70,31 +71,39 @@ Limitations:
 1. Go to the [Releases](../../releases) page.
 2. Download the latest `KlipperTrayIcon_vX.X.X.zip`.
 3. Extract it anywhere and run `KlipperTrayIcon.exe` from the extracted folder (keep the other
-   files and the `_internal` folder next to it).
+   files next to it).
 4. On first launch, pick your printer type, enter its details and click **Start**.
 
+**Upgrading from 1.x:** copy your old `config.json` next to the new `KlipperTrayIcon.exe` — the
+settings format hasn't changed. *Start with Windows* is carried over automatically.
+
+Tips:
+- Running `KlipperTrayIcon.exe` again while it's already running opens the webcam popup.
+- `KlipperTrayIcon.exe --settings` opens the Settings window on startup.
+
 ### Method 2: Run from Source
-If you prefer to run the Python script directly:
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 1. Clone the repository.
-2. Install dependencies:
+2. Run the application:
    ```bash
-   pip install -r requirements.txt
+   dotnet run --project src/KlipperTrayIcon
    ```
-3. Run the application:
+3. Run the tests:
    ```bash
-   python klipper_tray.py
+   dotnet test
    ```
 
-## Building form Source
-To build the `.exe` yourself:
+## Building from Source
+Run the build script (requires the .NET 10 SDK):
+```bash
+build.bat
+```
+It runs the tests and produces the app folder
+`publish/KlipperTrayIcon/` and the release zip `publish/KlipperTrayIcon_vX.X.X.zip`.
 
-1. Install requirements.
-2. Run the build script:
-   ```bash
-   build.bat
-   ```
-3. The app folder is `dist/KlipperTrayIcon/` and the release zip is `dist/KlipperTrayIcon_vX.X.X.zip`.
+The project lives in `src/KlipperTrayIcon` (open `KlipperTrayIcon.slnx` in Visual Studio or
+Rider). The original Python version (1.x) is in `legacy-python/` for reference.
 
 ## Configuration
 Right-click the tray icon and choose **Settings…** to change anything. Settings are stored in a
@@ -132,11 +141,6 @@ running `~/moonraker/scripts/fetch-apikey.sh` on the printer.
 
 ## License
 MIT
-
-This project bundles [go2rtc](https://github.com/AlexxIT/go2rtc) (MIT licensed) and a static
-[ffmpeg](https://ffmpeg.org) build (LGPL 2.1+, via [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds))
-to support Bambu Lab RTSPS camera streaming. Neither is linked into this project's own code —
-both are invoked as separate local subprocesses.
 
 ## Disclaimer
 This software was written with the assistance of an AI coding assistant.

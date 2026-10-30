@@ -1,0 +1,152 @@
+<Window x:Class="KlipperTrayIcon.UI.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Klipper Tray Icon Settings"
+        SizeToContent="Height"
+        Width="600"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Opacity" Value="0.65" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,4,0,12" />
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,16,0" />
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="28,22,28,24">
+        <!-- First run only -->
+        <StackPanel x:Name="WelcomePanel" Visibility="Collapsed" Margin="0,0,0,18">
+            <TextBlock Text="Welcome!" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock TextWrapping="Wrap" Margin="0,6,0,0"
+                       Text="Tell the tray icon which printer to watch. You can change this later from the tray menu under Settings." />
+        </StackPanel>
+
+        <TextBlock Text="Printer" Style="{StaticResource SectionHeader}" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+            <RadioButton x:Name="KlipperRadio" Content="Klipper (Mainsail / Fluidd)" GroupName="Type"
+                         Margin="0,0,24,0" Checked="OnTypeChanged" />
+            <RadioButton x:Name="BambuRadio" Content="Bambu Lab" GroupName="Type" Checked="OnTypeChanged" />
+        </StackPanel>
+
+        <!-- Klipper -->
+        <Grid x:Name="KlipperPanel">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="Address" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="UrlBox" Grid.Column="1" Grid.ColumnSpan="2" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="The address you open Mainsail or Fluidd at, e.g. mainsail.local or 192.168.1.50" />
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Text="API key" VerticalAlignment="Center" />
+                <TextBlock x:Name="ApiKeyInfo" Text="&#x24D8;" FontSize="15" Margin="6,0,0,0" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Cursor="Help"
+                           ToolTipService.InitialShowDelay="200" ToolTipService.ShowDuration="60000">
+                    <TextBlock.ToolTip>
+                        <ToolTip>
+                            <TextBlock TextWrapping="Wrap" MaxWidth="380">
+                                <Run Text="Usually not needed." FontWeight="SemiBold" />
+                                <Run Text="Moonraker lets devices on your home network in without a key (its trusted_clients setting covers 192.168.x.x, 10.x.x.x and 172.16–31.x.x addresses by default)." />
+                                <LineBreak /><LineBreak />
+                                <Run Text="You'll need it if:" />
+                                <LineBreak />
+                                <Run Text="•  this PC reaches the printer over Tailscale, another VPN or the internet" />
+                                <LineBreak />
+                                <Run Text="•  trusted_clients in moonraker.conf has been narrowed" />
+                                <LineBreak />
+                                <Run Text="•  Mainsail/Fluidd is set to require a login" />
+                                <LineBreak /><LineBreak />
+                                <Run Text="If Test connection says Moonraker refused access, add the key here. To get it, run ~/moonraker/scripts/fetch-apikey.sh on the printer." />
+                            </TextBlock>
+                        </ToolTip>
+                    </TextBlock.ToolTip>
+                </TextBlock>
+            </StackPanel>
+            <Grid Grid.Row="2" Grid.Column="1">
+                <PasswordBox x:Name="ApiKeyHidden" />
+                <TextBox x:Name="ApiKeyVisible" Visibility="Collapsed" />
+            </Grid>
+            <CheckBox x:Name="ShowApiKey" Grid.Row="2" Grid.Column="2" Content="Show" Margin="12,0,0,0"
+                      Checked="OnShowApiKeyChanged" Unchecked="OnShowApiKeyChanged" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="Optional — leave blank unless Moonraker asks for one." />
+            <CheckBox x:Name="ConsoleCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,8"
+                      Content="Show the Klipper console next to the webcam" />
+        </Grid>
+
+        <!-- Bambu -->
+        <Grid x:Name="BambuPanel" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="IP address" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="IpBox" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8" />
+            <TextBlock Grid.Row="1" Text="Serial number" Style="{StaticResource FieldLabel}" />
+            <TextBox x:Name="SerialBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                     CharacterCasing="Upper" />
+            <TextBlock Grid.Row="2" Text="Access code" Style="{StaticResource FieldLabel}" />
+            <Grid Grid.Row="2" Grid.Column="1">
+                <PasswordBox x:Name="CodeHidden" />
+                <TextBox x:Name="CodeVisible" Visibility="Collapsed" />
+            </Grid>
+            <CheckBox x:Name="ShowCode" Grid.Row="2" Grid.Column="2" Content="Show" Margin="12,0,0,0"
+                      Checked="OnShowCodeChanged" Unchecked="OnShowCodeChanged" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="All three are on the printer's screen under Settings → WLAN / Network. For the camera, turn on “LAN Mode Live View”. LAN Only Mode is not required." />
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+            <Button x:Name="TestButton" Content="Test connection" Click="OnTestClick" />
+            <TextBlock x:Name="TestResult" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap" MaxWidth="380" />
+        </StackPanel>
+
+        <Separator Margin="0,20,0,18" />
+
+        <TextBlock Text="General" Style="{StaticResource SectionHeader}" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="Check printer every" VerticalAlignment="Center" />
+            <TextBox x:Name="IntervalBox" Width="64" Margin="10,0" HorizontalContentAlignment="Center"
+                     PreviewTextInput="OnIntervalPreviewInput" />
+            <TextBlock Text="seconds" VerticalAlignment="Center" />
+        </StackPanel>
+        <CheckBox x:Name="NotifyCheck" Content="Notify me when a print finishes, fails or pauses" Margin="0,0,0,6" />
+        <CheckBox x:Name="AutostartCheck" Content="Start with Windows" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+            <Button x:Name="SaveButton" Content="Save" MinWidth="96" IsDefault="True" Click="OnSaveClick"
+                    Style="{DynamicResource AccentButtonStyle}" />
+            <Button x:Name="CancelButton" Content="Cancel" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

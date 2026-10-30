@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Only for NotifyIcon (the tray icon); WPF has no tray API of its own. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <!-- WPF and WinForms share type names; explicit usings avoid ambiguity. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KlipperTrayIcon</RootNamespace>
+    <AssemblyName>KlipperTrayIcon</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- ThemeMode (the Windows 11 Fluent theme) is still marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- Source-generated Win32 interop (LibraryImport) needs this. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Release publishing: self-contained (nothing to install), one exe plus
+         WPF's few native DLLs next to it - nothing is unpacked to a temp
+         folder at startup (that's what antivirus heuristics dislike), and no
+         single-file compression (it would hold the whole runtime in RAM).
+         ReadyToRun isn't used: the popup's warm-up already makes the first
+         show fast, and it would add ~6 MB and more memory. -->
+    <Version>2.0.0</Version>
+    <Product>Klipper Tray Icon</Product>
+    <Company>sturkfurkan</Company>
+    <Copyright>sturkfurkan</Copyright>
+    <Description>Klipper Tray Icon - 3D printer status in the Windows tray</Description>
+    <!-- Shown as the exe's "File description" in Explorer and Task Manager. -->
+    <AssemblyTitle>Klipper Tray Icon - 3D printer status in the Windows tray</AssemblyTitle>
+  </PropertyGroup>
+
+  <!-- Only when publishing, so the test project can still reference this one. -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
+    <InternalsVisibleTo Include="KlipperTrayIcon.Tests" />
+  </ItemGroup>
+
+</Project>

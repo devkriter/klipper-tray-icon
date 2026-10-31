@@ -200,7 +200,55 @@ public class WebcamSourceTests
         Assert.Equal(("http://p/webcam/stream", StreamKind.Mjpeg), (source!.Stream, source.Kind));
     }
 
+    [Fact]
+    public async Task FindsAndPlaysCameraStreamerRtsp()
+    {
+        // camera-streamer with RTSP on: its status page gives the RTSP address under the
+        // name the printer's web server uses for it; the printer's address replaces that.
+        using var camera = new FakeRtspsCamera(null, Path.Combine(AppContext.BaseDirectory, "Assets", "smptebars_1080p.h264"), tls: false);
+        var http = Stub(r => r.RequestUri!.PathAndQuery switch
+        {
+            "/server/webcams/list" => Json(CameraStreamerWebcams),
+            "/webcam/status" => Json("""{"endpoints":{"rtsp":{"enabled":true,"uri":"rtsp://mjpgstreamer1:""" + camera.Port + """/stream.h264"}}}"""),
+            "/webcam/stream" => Mjpeg(),
+            _ => null,
+        });
+        var backend = new MoonrakerBackend("http://127.0.0.1", http: http);
+        Assert.Equal([StreamKind.Rtsp, StreamKind.Mjpeg, StreamKind.Snapshots], await backend.ListStreamsAsync("", CameraView.Main, default));
+        var source = await backend.GetViewSourceAsync(CameraView.Main, default);
+        Assert.Equal(($"rtsp://127.0.0.1:{camera.Port}/stream.h264", StreamKind.Rtsp, "http://127.0.0.1/webcam/stream"),
+                     (source!.Stream, source.Kind, source.Fallback));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        int pictures = 0;
+        await foreach (var frame in backend.GetWebcamFramesAsync(CameraView.Main, cts.Token))
+        {
+            using (frame)
+                Assert.IsType<PixelFrame>(frame);
+            if (++pictures == 3)
+                break;
+        }
+        Assert.Equal(3, pictures);
+    }
+
     [Theory]
+    [InlineData("""{"endpoints":{"rtsp":{"enabled":false}}}""")]
+    [InlineData(null)] // not camera-streamer: no status page
+    public async Task NoRtspWhenItIsOff(string? status)
+    {
+        var http = Stub(r => r.RequestUri!.PathAndQuery switch
+        {
+            "/server/webcams/list" => Json(CameraStreamerWebcams),
+            "/webcam/status" when status != null => Json(status),
+            "/webcam/stream" => Mjpeg(),
+            _ => null,
+        });
+        var backend = new MoonrakerBackend("p", http: http);
+        Assert.Equal([StreamKind.Mjpeg, StreamKind.Snapshots], await backend.ListStreamsAsync("", CameraView.Main, default));
+    }
+
+    [Theory]
+    [InlineData("rtsp", StreamKind.Rtsp)]
     [InlineData("h264", StreamKind.H264)]
     [InlineData("MJPEG", StreamKind.Mjpeg)]
     [InlineData(" snapshots ", StreamKind.Snapshots)]

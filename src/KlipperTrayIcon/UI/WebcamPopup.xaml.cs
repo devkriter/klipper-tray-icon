@@ -105,6 +105,9 @@ public partial class WebcamPopup : Window
             HideFromFocusLoss();
         };
         StateChanged += (_, _) => FitMaximized();
+        // The decoder only converts H.264 as big as the picture is shown.
+        VideoImage.SizeChanged += (_, _) => ReportVideoWidth();
+        DpiChanged += (_, _) => ReportVideoWidth();
         // handledEventsToo: the console's ScrollViewer marks clicks handled.
         AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnDragAnywhere), handledEventsToo: true);
         KeyDown += (_, e) => { if (e.Key == Key.Escape) HidePopup(); };
@@ -270,6 +273,12 @@ public partial class WebcamPopup : Window
         return false;
     }
 
+    private void ReportVideoWidth()
+    {
+        if (VideoImage.ActualWidth > 0)
+            _backend.VideoWidth = (int)Math.Round(VideoImage.ActualWidth * VisualTreeHelper.GetDpi(this).DpiScaleX);
+    }
+
     /// <summary>
     /// A maximized window without a title bar overhangs the screen by its
     /// resize border; pad it back in so nothing is cut off.
@@ -359,8 +368,12 @@ public partial class WebcamPopup : Window
         var tiles = StatusText.StatsTiles(status);
         var items = new StatTile[tiles.Length];
         for (int i = 0; i < tiles.Length; i++)
-            items[i] = new StatTile(StatLabels[i], tiles[i].Value, tiles[i].Detail,
+        {
+            // Printers with several extruders: which one the nozzle tile shows, e.g. "NOZZLE T2".
+            string label = i == 0 && status.Details?.Tool is string tool ? $"{StatLabels[i]} {tool}" : StatLabels[i];
+            items[i] = new StatTile(label, tiles[i].Value, tiles[i].Detail,
                                     tiles[i].Highlight ? ConsoleLine.TemperatureBrush : ConsoleLine.ResponseBrush);
+        }
         StatsList.ItemsSource = items;
         bool showProgress = status.State is "printing" or "paused" or "complete";
         ProgressScale.ScaleX = showProgress ? Math.Clamp(status.Progress, 0, 1) : 0;

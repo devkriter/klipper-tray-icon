@@ -24,6 +24,10 @@ public sealed class MoonrakerBackend : IPrinterBackend
     private readonly Dictionary<string, string> _headers = new();
     private string? _lastFilename;
     private GcodeFileInfo _fileInfo = GcodeFileInfo.None;
+    // The extruder in use ("extruder", "extruder1", ...), from the last poll: on
+    // toolchangers (Snapmaker U1) and IDEX printers the nozzle tile follows it.
+    private string _activeExtruder = "extruder";
+    private bool _multiTool;
     private readonly string _webcamName, _secondViewName;
     private readonly StreamKind?[] _preferredStream = new StreamKind?[2]; // by CameraView; null: automatic
     private readonly ViewSource?[] _views = new ViewSource?[2]; // by CameraView
@@ -52,6 +56,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
     public bool SupportsWebcam => true;
     public bool SupportsConsole => true;
     public string? DashboardUrl => BaseUrl;
+    public int VideoWidth { get; set; }
 
     /// <summary>The address's host until the printer has told us its hostname.</summary>
     public string DisplayName => _hostname ?? (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) ? uri.Host : BaseUrl);
@@ -111,7 +116,8 @@ public sealed class MoonrakerBackend : IPrinterBackend
         {
             using var doc = await GetJsonAsync(
                 "/printer/objects/query?print_stats&display_status&virtual_sdcard" +
-                "&extruder=temperature,target&heater_bed=temperature,target&gcode_move=gcode_position",
+                $"&{_activeExtruder}=temperature,target&toolhead=extruder" +
+                "&heater_bed=temperature,target&gcode_move=gcode_position",
                 TimeSpan.FromSeconds(2), ct);
             var status = doc.RootElement.Prop("result").Prop("status");
             var printStats = status.Prop("print_stats");
@@ -181,8 +187,16 @@ public sealed class MoonrakerBackend : IPrinterBackend
         }
     }
 
-    private static PrintDetails ReadDetails(JsonElement status, string state, GcodeFileInfo file)
+    private PrintDetails ReadDetails(JsonElement status, string state, GcodeFileInfo file)
     {
+        // Read the extruder asked for this time; ask for the one now in use next time.
+        string asked = _activeExtruder;
+        string active = status.Prop("toolhead").Str("extruder", asked);
+        if (System.Text.RegularExpressions.Regex.IsMatch(active, "^extruder[0-9]*$"))
+            _activeExtruder = active;
+        _multiTool |= active != "extruder";
+        string? tool = _multiTool ? "T" + (asked == "extruder" ? "0" : asked["extruder".Length..]) : null;
+
         static Heater? ReadHeater(JsonElement h) =>
             h.ValueKind == JsonValueKind.Object ? new Heater(h.Num("temperature"), h.Num("target")) : null;
 
@@ -200,7 +214,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
             if (layer != null && total != null)
                 layer = Math.Min(layer.Value, total.Value);
         }
-        return new PrintDetails(ReadHeater(status.Prop("extruder")), ReadHeater(status.Prop("heater_bed")), layer, total, z);
+        return new PrintDetails(ReadHeater(status.Prop(asked)), ReadHeater(status.Prop("heater_bed")), layer, total, z, tool);
     }
 
     private static int? Positive(double? value) => value > 0 ? (int)value : null;
@@ -262,6 +276,11 @@ public sealed class MoonrakerBackend : IPrinterBackend
     private const int H264TroubleLimit = 3;
     private static readonly TimeSpan H264TroubleWindow = TimeSpan.FromSeconds(30);
     private readonly List<DateTime>[] _h264Trouble = [new(), new()]; // by CameraView
+    // After switching to MJPEG, try the better stream again this much later: the trouble
+    // may have been a passing outage (a camera service restarting itself takes 10-20 s).
+    private static readonly TimeSpan RetryBetterStreamAfter = TimeSpan.FromMinutes(5);
+    private readonly ViewSource?[] _betterStream = new ViewSource?[2]; // by CameraView
+    private readonly DateTime[] _retryBetterAt = new DateTime[2];
     // A polled view that hasn't changed still sends a frame this often, so the
     // popup doesn't take a still touchscreen for a stalled stream.
     private static readonly TimeSpan PollKeepAlive = TimeSpan.FromSeconds(5);
@@ -306,6 +325,13 @@ public sealed class MoonrakerBackend : IPrinterBackend
     /// </summary>
     internal async Task<ViewSource?> GetViewSourceAsync(CameraView view, CancellationToken ct)
     {
+        if (_betterStream[(int)view] is { } better && DateTime.UtcNow >= _retryBetterAt[(int)view])
+        {
+            _views[(int)view] = better;
+            _betterStream[(int)view] = null;
+            lock (_h264Trouble[(int)view])
+                _h264Trouble[(int)view].Clear();
+        }
         if (_views[(int)view] is { } cached)
             return cached;
         string wanted = view == CameraView.Main ? _webcamName : _secondViewName;
@@ -365,18 +391,18 @@ public sealed class MoonrakerBackend : IPrinterBackend
         string snapshot = streams[^1].Url; // snapshots are always last
         if (pick.Kind == StreamKind.Snapshots)
             return (new ViewSource(null, snapshot, touch, StreamKind.Snapshots), certain);
-        // Automatic H.264 keeps MJPEG in reserve, in case H.264 turns out unreliable.
-        string? fallback = preferred == null && pick.Kind == StreamKind.H264
+        // Automatic RTSP or H.264 keeps MJPEG in reserve, in case they turn out unreliable.
+        string? fallback = preferred == null && pick.Kind is StreamKind.Rtsp or StreamKind.H264
             ? streams.FirstOrDefault(s => s.Kind == StreamKind.Mjpeg)?.Url
             : null;
         return (new ViewSource(pick.Url, snapshot, null, pick.Kind, fallback), certain);
     }
 
     /// <summary>
-    /// Every way a webcam can be shown, best first: H.264 (camera-streamer
-    /// serves its hardware-encoded video as video.h264, at a fraction of
-    /// MJPEG's bandwidth), MJPEG, and polling its snapshot, which is always
-    /// offered. WebRTC/HLS/iframe views need a browser, but the servers behind
+    /// Every way a webcam can be shown, best first: RTSP (camera-streamer's
+    /// RTSP server, if it's turned on), H.264 (camera-streamer serves its
+    /// hardware-encoded video as video.h264; both are a fraction of MJPEG's
+    /// bandwidth), MJPEG, and polling its snapshot, which is always offered. WebRTC/HLS/iframe views need a browser, but the servers behind
     /// them (camera-streamer, paxx12's firmware for the Snapmaker U1) usually
     /// serve one of these next to them. Touch is the remote screen's tap URL
     /// if the view is one (paxx12's page sends taps to "touch" next to it).
@@ -388,19 +414,74 @@ public sealed class MoonrakerBackend : IPrinterBackend
         string folder = Folder(stream);
 
         string h264Url = stream.EndsWith(".h264", StringComparison.OrdinalIgnoreCase) ? stream : folder + "video.h264";
+        var rtsp = FindRtspAsync(folder, ct);
         var h264 = IsH264Async(h264Url, ct);
         var mjpeg = FindMjpegAsync(cam, stream, folder, ct);
         var touch = PageMentionsAsync(stream, "touch?a=", ct);
-        await Task.WhenAll(h264, mjpeg, touch);
+        await Task.WhenAll(rtsp, h264, mjpeg, touch);
 
         var streams = new List<StreamChoice>();
+        if (rtsp.Result.Url is string rtspUrl)
+            streams.Add(new StreamChoice(StreamKind.Rtsp, rtspUrl));
         if (h264.Result == true)
             streams.Add(new StreamChoice(StreamKind.H264, h264Url));
         if (mjpeg.Result.Url is string mjpegUrl)
             streams.Add(new StreamChoice(StreamKind.Mjpeg, mjpegUrl));
         streams.Add(new StreamChoice(StreamKind.Snapshots, snapshot));
-        bool certain = h264.Result != null && mjpeg.Result.Certain && touch.Result != null;
+        bool certain = rtsp.Result.Certain && h264.Result != null && mjpeg.Result.Certain && touch.Result != null;
         return (streams, touch.Result == true ? folder + "touch" : null, certain);
+    }
+
+    /// <summary>
+    /// camera-streamer's RTSP server, if it's on: its status page (next to the
+    /// stream) says so. The address it gives is the name the printer's own web
+    /// server uses for it (e.g. "mjpgstreamer1"), so the printer's address
+    /// replaces it; then the port has to answer.
+    /// </summary>
+    private async Task<(string? Url, bool Certain)> FindRtspAsync(string folder, CancellationToken ct)
+    {
+        JsonDocument status;
+        try { status = await GetJsonAsync(RelativeToBase(folder + "status"), TimeSpan.FromSeconds(3), ct); }
+        catch (Exception e) when (e is MoonrakerHttpException or JsonException) { return (null, true); } // not camera-streamer
+        catch (Exception) when (!ct.IsCancellationRequested) { return (null, false); }
+        using (status)
+        {
+            var endpoint = status.RootElement.Prop("endpoints").Prop("rtsp");
+            if (endpoint.Prop("enabled").ValueKind != JsonValueKind.True)
+                return (null, true);
+            string host = new Uri(BaseUrl).Host;
+            var builder = Uri.TryCreate(endpoint.Str("uri"), UriKind.Absolute, out var given) && given.Scheme == "rtsp"
+                ? new UriBuilder(given)
+                : new UriBuilder("rtsp", host, 8554, "/stream.h264"); // camera-streamer's defaults
+            builder.Host = host;
+            bool? open = await PortAnswersAsync(builder.Host, builder.Port, ct);
+            return (open == true ? builder.Uri.ToString() : null, open != null);
+        }
+    }
+
+    /// <summary>The path and query of a URL on the printer, for GetJsonAsync (which adds BaseUrl).</summary>
+    private string RelativeToBase(string url) =>
+        url.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase) ? url[BaseUrl.Length..] : new Uri(url).PathAndQuery;
+
+    /// <summary>True if something listens there, false if the connection is refused, null if no answer.</summary>
+    private static async Task<bool?> PortAnswersAsync(string host, int port, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(2));
+        using var tcp = new System.Net.Sockets.TcpClient();
+        try
+        {
+            await tcp.ConnectAsync(host, port, cts.Token);
+            return true;
+        }
+        catch (System.Net.Sockets.SocketException e) when (e.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionRefused)
+        {
+            return false;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private async Task<(string? Url, bool Certain)> FindMjpegAsync(WebcamInfo cam, string stream, string folder, CancellationToken ct)
@@ -515,13 +596,16 @@ public sealed class MoonrakerBackend : IPrinterBackend
     {
         if (await GetViewSourceAsync(view, ct) is not { } source)
             yield break;
-        if (source is { Kind: StreamKind.H264, Stream: string video })
+        if (source is { Kind: StreamKind.Rtsp or StreamKind.H264, Stream: string video })
         {
             var trouble = _h264Trouble[(int)view];
             while (!ct.IsCancellationRequested)
             {
                 int pictures = 0;
-                await foreach (var picture in ReadH264Async(video, ct))
+                var pictureStream = source.Kind == StreamKind.Rtsp
+                    ? EndQuietly(RtspVideo.ReadFramesAsync(new Uri(video), () => VideoWidth, ct))
+                    : ReadH264Async(video, ct);
+                await foreach (var picture in pictureStream)
                 {
                     pictures++;
                     yield return picture;
@@ -534,7 +618,9 @@ public sealed class MoonrakerBackend : IPrinterBackend
                     trouble.RemoveAll(t => DateTime.UtcNow - t > H264TroubleWindow);
                     if (source.Fallback is string mjpeg && trouble.Count >= H264TroubleLimit)
                     {
-                        // Automatic, and H.264 keeps failing: MJPEG from now on (until settings change).
+                        // Automatic, and RTSP/H.264 keeps failing: MJPEG for a while.
+                        _betterStream[(int)view] = source;
+                        _retryBetterAt[(int)view] = DateTime.UtcNow + RetryBetterStreamAfter;
                         _views[(int)view] = source with { Stream = mjpeg, Kind = StreamKind.Mjpeg, Fallback = null };
                         yield break;
                     }
@@ -543,8 +629,8 @@ public sealed class MoonrakerBackend : IPrinterBackend
                 if (pictures == 0)
                     yield break;
                 // Hung up mid-stream, which camera-streamer's video.h264 does every few
-                // seconds on some printers. A new connection starts with a keyframe, so
-                // carry straight on.
+                // seconds on some printers, and a flaky camera can do to either. A new
+                // connection starts with a keyframe, so carry straight on.
             }
             yield break;
         }
@@ -553,6 +639,25 @@ public sealed class MoonrakerBackend : IPrinterBackend
             : PollSnapshotsAsync(source.Snapshot, ct);
         await foreach (var frame in frames)
             yield return new ImageFrame(frame);
+    }
+
+    /// <summary>A stream of pictures that ends, rather than throws, when it fails.</summary>
+    private static async IAsyncEnumerable<CameraFrame> EndQuietly(IAsyncEnumerable<CameraFrame> frames)
+    {
+        await using var e = frames.GetAsyncEnumerator();
+        while (true)
+        {
+            try
+            {
+                if (!await e.MoveNextAsync())
+                    yield break;
+            }
+            catch (Exception)
+            {
+                yield break;
+            }
+            yield return e.Current;
+        }
     }
 
     /// <summary>A raw H.264 stream (camera-streamer's video.h264), decoded by Windows.</summary>
@@ -566,6 +671,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
             foreach (var unit in splitter.Feed(chunk))
             {
                 List<PixelFrame> pictures;
+                decoder.TargetWidth = VideoWidth;
                 try { pictures = decoder.Decode(unit, clock.Elapsed.Ticks); }
                 catch (System.Runtime.InteropServices.COMException) { continue; } // a damaged picture; the next keyframe recovers
                 foreach (var picture in pictures)

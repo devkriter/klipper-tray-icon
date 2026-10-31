@@ -60,6 +60,40 @@ public sealed record SdpVideo(string Control, int PayloadType, string Codec, IRe
     }
 }
 
+/// <summary>An RTSP camera's H.264 video, decoded by Windows.</summary>
+public static class RtspVideo
+{
+    /// <summary>
+    /// Pictures until cancelled or the camera stops. Throws if it refuses.
+    /// Hanging up (when the caller stops) disconnects at once, which matters
+    /// for cameras that take one viewer at a time (Bambu).
+    /// </summary>
+    /// <param name="videoWidth">How wide the picture is shown, asked before each frame (see <see cref="H264Decoder.TargetWidth"/>).</param>
+    public static async IAsyncEnumerable<CameraFrame> ReadFramesAsync(Uri uri, Func<int> videoWidth,
+                                                                     [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var rtsp = new RtspClient(uri);
+        await rtsp.StartAsync(ct);
+        using var decoder = new H264Decoder();
+        var depacketizer = new H264Depacketizer(rtsp.Video!.ParameterSets);
+        var units = new List<AccessUnit>();
+        await foreach (var packet in rtsp.ReadPacketsAsync(ct))
+        {
+            depacketizer.Push(packet, units);
+            foreach (var unit in units)
+            {
+                List<PixelFrame> frames;
+                decoder.TargetWidth = videoWidth();
+                try { frames = decoder.Decode(unit.Data, unit.Timestamp * 1000L / 9); } // 90 kHz -> 100 ns
+                catch (System.Runtime.InteropServices.COMException) { continue; } // a damaged picture; the next keyframe recovers
+                foreach (var frame in frames)
+                    yield return frame;
+            }
+            units.Clear();
+        }
+    }
+}
+
 /// <summary>
 /// A minimal RTSP client (RFC 2326) for one H.264 camera stream: DESCRIBE,
 /// SETUP and PLAY with the video interleaved on the same TCP connection
@@ -87,6 +121,8 @@ public sealed class RtspClient : IAsyncDisposable
     private string? _contentBase;
     private int _videoChannel;
     private Timer? _keepAlive;
+    // Video that arrived before the answer to PLAY, kept for ReadPacketsAsync.
+    private readonly List<byte[]> _early = new();
 
     public RtspClient(Uri uri)
     {
@@ -149,6 +185,10 @@ public sealed class RtspClient : IAsyncDisposable
     /// <summary>RTP packets of the video track, until cancelled or the camera hangs up.</summary>
     public async IAsyncEnumerable<RtpPacket> ReadPacketsAsync([EnumeratorCancellation] CancellationToken ct)
     {
+        foreach (var early in _early)
+            if (RtpPacket.TryParse(early, out var rtp) && rtp.PayloadType == Video!.PayloadType)
+                yield return rtp;
+        _early.Clear();
         while (!ct.IsCancellationRequested)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -289,6 +329,21 @@ public sealed class RtspClient : IAsyncDisposable
 
     private async Task<Response> ReadResponseAsync(CancellationToken ct)
     {
+        // Servers may send interleaved packets ahead of an answer: LIVE555 (camera-streamer's
+        // RTSP server) sends an RTCP report, and video can start, before its reply to PLAY.
+        while (true)
+        {
+            await FillAsync(1, ct);
+            if (_buffer[_start] != (byte)'$')
+                break;
+            await FillAsync(4, ct);
+            int channel = _buffer[_start + 1];
+            int packetLength = (_buffer[_start + 2] << 8) | _buffer[_start + 3];
+            await FillAsync(4 + packetLength, ct);
+            if (channel == _videoChannel && Video != null && _session != null)
+                _early.Add(_buffer.AsSpan(_start + 4, packetLength).ToArray());
+            _start += 4 + packetLength;
+        }
         string status = await ReadLineAsync(ct);
         var match = Regex.Match(status, @"^RTSP/\d\.\d (\d{3})");
         if (!match.Success)

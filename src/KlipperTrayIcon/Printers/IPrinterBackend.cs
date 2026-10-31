@@ -23,6 +23,12 @@ public interface IPrinterBackend : IDisposable
     /// <summary>Name of the second view the popup can switch to (e.g. the printer's touchscreen), or null.</summary>
     string? SecondViewName { get; }
 
+    /// <summary>
+    /// How many screen pixels wide the popup shows the video (0: unknown).
+    /// H.264 is converted no bigger than that needs; can change while playing.
+    /// </summary>
+    int VideoWidth { get; set; }
+
     /// <summary>Frames of the live camera until cancelled or the stream ends. The caller disposes each one.</summary>
     IAsyncEnumerable<CameraFrame> GetWebcamFramesAsync(CameraView view, CancellationToken ct);
     /// <summary>One JPEG (or PNG) if the printer can serve one cheaply, else null.</summary>
@@ -44,11 +50,11 @@ public enum CameraView { Main, Second }
 public enum TouchAction { Down, Move, Up }
 
 /// <summary>How a Klipper webcam's pictures are fetched, best first.</summary>
-public enum StreamKind { H264, Mjpeg, Snapshots }
+public enum StreamKind { Rtsp, H264, Mjpeg, Snapshots }
 
 public static class StreamKinds
 {
-    /// <summary>The config value ("h264", "mjpeg", "snapshots"); empty means automatic.</summary>
+    /// <summary>The config value ("rtsp", "h264", "mjpeg", "snapshots"); empty means automatic.</summary>
     public static string ToConfig(StreamKind kind) => kind.ToString().ToLowerInvariant();
 
     public static StreamKind? Parse(string? value) =>
@@ -56,6 +62,7 @@ public static class StreamKinds
 
     public static string Label(StreamKind kind) => kind switch
     {
+        StreamKind.Rtsp => "RTSP",
         StreamKind.H264 => "H.264",
         StreamKind.Mjpeg => "MJPEG",
         _ => "Snapshots",

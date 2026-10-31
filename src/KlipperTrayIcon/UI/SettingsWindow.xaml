@@ -18,17 +18,32 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,4,0,12" />
         </Style>
+        <!-- In the open list each stream has a line saying what it is; the closed box shows just its name. -->
+        <DataTemplate x:Key="StreamItem">
+            <StackPanel Margin="0,3">
+                <TextBlock Text="{Binding Label}" />
+                <TextBlock x:Name="Description" Text="{Binding Description}" FontSize="12" Opacity="0.65"
+                           TextWrapping="Wrap" MaxWidth="320" Margin="0,2,0,0" />
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
+                    <Setter TargetName="Description" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
         <ToolTip x:Key="StreamTip">
             <TextBlock TextWrapping="Wrap" MaxWidth="360">
                 <Run Text="How the picture is fetched. Only what this camera offers is listed." FontWeight="SemiBold" />
                 <LineBreak /><LineBreak />
-                <Run Text="•  H.264: the camera's own video (camera-streamer). Far less network traffic than MJPEG." />
+                <Run Text="•  RTSP: compressed H.264 video over RTSP, the standard protocol for network cameras." />
                 <LineBreak />
-                <Run Text="•  MJPEG: a stream of pictures. Works almost everywhere." />
+                <Run Text="•  H.264: compressed H.264 video over HTTP. Both use far less bandwidth than MJPEG." />
                 <LineBreak />
-                <Run Text="•  Snapshots: refreshed about ten times a second." />
+                <Run Text="•  MJPEG: a continuous series of JPEG pictures. Works with almost every camera." />
+                <LineBreak />
+                <Run Text="•  Snapshots: single pictures, fetched about ten times a second." />
                 <LineBreak /><LineBreak />
-                <Run Text="Automatic uses the first of these the camera has, and switches from H.264 to MJPEG if H.264 keeps dropping." />
+                <Run Text="Automatic uses the best one the camera offers, and switches to MJPEG if RTSP or H.264 keeps dropping." />
             </TextBlock>
         </ToolTip>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
@@ -116,12 +131,12 @@
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
             <!-- How each camera is fetched: whatever the printer turned out to offer. -->
             <ComboBox x:Name="CameraStreamCombo" Grid.Row="4" Grid.Column="2" Width="170" Margin="8,0,0,8"
-                      DisplayMemberPath="Label" ToolTip="{StaticResource StreamTip}" />
+                      ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
             <TextBlock Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1"
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
             <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="5" Grid.Column="2" Width="170" Margin="8,0,0,0"
-                      DisplayMemberPath="Label" ToolTip="{StaticResource StreamTip}" />
+                      ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
             <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Test connection lists the printer's cameras and the streams each one offers. The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen." />
 
@@ -183,7 +198,8 @@
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
             <Button x:Name="SaveButton" Content="Save" MinWidth="96" IsDefault="True" Click="OnSaveClick"
                     Style="{DynamicResource AccentButtonStyle}" />
-            <Button x:Name="CancelButton" Content="Cancel" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+            <Button x:Name="CancelButton" Content="Cancel" MinWidth="96" Margin="8,0,0,0" IsCancel="True"
+                    Click="OnCancelClick" />
         </StackPanel>
     </StackPanel>
 </Window>

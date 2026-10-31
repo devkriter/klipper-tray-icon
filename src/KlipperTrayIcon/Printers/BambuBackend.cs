@@ -65,6 +65,7 @@ public sealed class BambuBackend : IPrinterBackend
     public bool SupportsConsole => false;
     public string? DashboardUrl => null;
     public string DisplayName => "Bambu Lab";
+    public int VideoWidth { get; set; }
     public string? SecondViewName => null;
 
     // ---- report parsing (community-documented schema; no official docs) ----
@@ -267,27 +268,7 @@ public sealed class BambuBackend : IPrinterBackend
     public bool IsTouchable(CameraView view) => false;
     public Task SendTouchAsync(CameraView view, TouchAction action, int x, int y, CancellationToken ct) => Task.CompletedTask;
 
-    public async IAsyncEnumerable<CameraFrame> GetWebcamFramesAsync(CameraView view, [EnumeratorCancellation] CancellationToken ct)
-    {
-        // Disposing the client (when the popup hides) hangs up at once: the
-        // printer allows only one camera viewer.
-        await using var rtsp = new RtspClient(BuildRtspsUrl(_ip, _accessCode, _cameraPort));
-        await rtsp.StartAsync(ct);
-        using var decoder = new H264Decoder();
-        var depacketizer = new H264Depacketizer(rtsp.Video!.ParameterSets);
-        var units = new List<AccessUnit>();
-        await foreach (var packet in rtsp.ReadPacketsAsync(ct))
-        {
-            depacketizer.Push(packet, units);
-            foreach (var unit in units)
-            {
-                List<PixelFrame> frames;
-                try { frames = decoder.Decode(unit.Data, unit.Timestamp * 1000L / 9); } // 90 kHz -> 100 ns
-                catch (COMException) { continue; } // a damaged picture; the next keyframe recovers
-                foreach (var frame in frames)
-                    yield return frame;
-            }
-            units.Clear();
-        }
-    }
+    // The printer allows only one camera viewer; stopping (the popup hides) hangs up at once.
+    public IAsyncEnumerable<CameraFrame> GetWebcamFramesAsync(CameraView view, CancellationToken ct) =>
+        RtspVideo.ReadFramesAsync(BuildRtspsUrl(_ip, _accessCode, _cameraPort), () => VideoWidth, ct);
 }

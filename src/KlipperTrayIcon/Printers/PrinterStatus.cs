@@ -29,7 +29,8 @@ public sealed record PrintDetails(
     Heater? Bed,
     int? Layer = null,
     int? TotalLayers = null,
-    double Z = 0);
+    double Z = 0,
+    string? Tool = null); // "T2" on printers with several extruders
 
 /// <summary>Target 0 means the heater is off.</summary>
 public sealed record Heater(double Temperature, double Target);

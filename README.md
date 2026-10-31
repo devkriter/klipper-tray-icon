@@ -179,9 +179,10 @@ For Bambu Lab (see `config.example.bambu.json`):
 
 `webcam_name` picks which of Moonraker's webcams to show (empty: the first one), and
 `second_view_name` adds a second one the popup can switch to — both are easiest to set from the
-lists in Settings. `webcam_stream` and `second_view_stream` pick how each is fetched: `h264`
-(camera-streamer's `video.h264`, far less bandwidth than MJPEG), `mjpeg` or `snapshots`; empty
-uses the best one the camera offers, and switches from H.264 to MJPEG if H.264 keeps dropping. Webcams that use WebRTC or an iframe work too if the printer also serves MJPEG
+lists in Settings. `webcam_stream` and `second_view_stream` pick how each is fetched: `rtsp`
+(camera-streamer's RTSP server, if it's turned on), `h264` (camera-streamer's `video.h264`; both
+need far less bandwidth than MJPEG), `mjpeg` or `snapshots`. Empty uses the best one the camera
+offers, and switches to MJPEG if RTSP or H.264 keeps dropping. Webcams that use WebRTC or an iframe work too if the printer also serves MJPEG
 or a snapshot for them. For the Snapmaker U1, see [Snapmaker U1 Support](#snapmaker-u1-support).
 
 `console_hide_timelapse` hides the commands moonraker-timelapse sends on every frame from the

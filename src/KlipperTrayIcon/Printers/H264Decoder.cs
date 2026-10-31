@@ -1,13 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace KlipperTrayIcon.Printers;
 
 /// <summary>
 /// Decodes H.264 with the decoder built into Windows (Media Foundation's
 /// H.264 decoder MFT), so no codec has to ship with the app. Output is BGRX,
-/// halved in size for 1280px-and-wider video - the popup is 640 px wide.
+/// halved in size for 1280px-and-wider video unless it's shown wider than
+/// half (see <see cref="TargetWidth"/>).
 /// COM is called through raw vtable slots (the slot numbers come from the
 /// Windows SDK headers), which keeps this to a few calls with no wrappers.
 /// </summary>
@@ -64,6 +66,13 @@ public sealed unsafe partial class H264Decoder : IDisposable
     private bool _outputTypeSet;
     private int _bufferWidth, _bufferHeight, _stride;
     private MFVideoArea _visible;
+
+    /// <summary>
+    /// How many pixels wide the picture is shown (0: unknown). Video 1280 px or
+    /// wider is converted at half size when that's all the screen shows, which
+    /// is a quarter of the work. Can be changed between frames.
+    /// </summary>
+    public int TargetWidth { get; set; }
 
     public H264Decoder()
     {
@@ -267,7 +276,9 @@ public sealed unsafe partial class H264Decoder : IDisposable
             Check(((delegate* unmanaged<void*, byte**, uint*, uint*, int>)Slot(buffer, Buffer_Lock))(buffer, &data, &max, &length));
             try
             {
-                int scale = _visible.Width >= 1280 ? 2 : 1;
+                // Half size unless the screen shows more than that (with a little slack, so
+                // a picture shown just over half size doesn't pay four times the work).
+                int scale = _visible.Width >= 1280 && TargetWidth <= _visible.Width / 2 * 115 / 100 ? 2 : 1;
                 int width = _visible.Width / scale, height = _visible.Height / scale;
                 var frame = new PixelFrame(width, height);
                 byte* luma = data, chroma = data + (long)_stride * _bufferHeight;
@@ -280,19 +291,17 @@ public sealed unsafe partial class H264Decoder : IDisposable
                         int sy = _visible.OffsetY + y * scale;
                         byte* yRow = luma + (long)sy * _stride + _visible.OffsetX;
                         byte* uvRow = chroma + (long)(sy / 2) * _stride + (_visible.OffsetX & ~1);
-                        byte* outRow = pixels + (long)y * width * 4;
-                        for (int x = 0; x < width; x++)
+                        uint* outRow = (uint*)(pixels + (long)y * width * 4);
+                        int x = scale == 1
+                            ? ConvertRowFull(yRow, uvRow, outRow, width)
+                            : ConvertRowHalf(yRow, uvRow, outRow, width, _stride);
+                        for (; x < width; x++) // what the vector code left over, or all of it without SIMD
                         {
                             int sx = x * scale;
                             int lum = scale == 1
                                 ? yRow[sx]
                                 : (yRow[sx] + yRow[sx + 1] + yRow[sx + _stride] + yRow[sx + _stride + 1] + 2) >> 2;
-                            int c = 298 * (lum - 16);
-                            int u = uvRow[sx & ~1] - 128, v = uvRow[(sx & ~1) + 1] - 128;
-                            outRow[x * 4 + 0] = Clamp((c + 516 * u + 128) >> 8);
-                            outRow[x * 4 + 1] = Clamp((c - 100 * u - 208 * v + 128) >> 8);
-                            outRow[x * 4 + 2] = Clamp((c + 409 * v + 128) >> 8);
-                            outRow[x * 4 + 3] = 255;
+                            outRow[x] = ToBgrx(lum, uvRow[sx & ~1] - 128, uvRow[(sx & ~1) + 1] - 128);
                         }
                     }
                 }
@@ -303,7 +312,85 @@ public sealed unsafe partial class H264Decoder : IDisposable
         finally { Unref(buffer); }
     }
 
+    // ---- NV12 to BGRX ---------------------------------------------------------
+    // BT.601 limited range in 8-bit fixed point:
+    //   C = 298 (Y - 16);  B = (C + 516 U) / 256;  G = (C - 100 U - 208 V) / 256;  R = (C + 409 V) / 256
+    // with U and V centred on 0. The vector versions do the same sums, 4 pixels to a
+    // Vector128<int>, and produce exactly the same bytes as the scalar one.
+
+    internal static uint ToBgrx(int lum, int u, int v)
+    {
+        int c = 298 * (lum - 16);
+        return Clamp((c + 516 * u + 128) >> 8) | (uint)Clamp((c - 100 * u - 208 * v + 128) >> 8) << 8
+               | (uint)Clamp((c + 409 * v + 128) >> 8) << 16 | 0xFF000000;
+    }
+
     private static byte Clamp(int v) => (byte)(v < 0 ? 0 : v > 255 ? 255 : v);
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static Vector128<uint> ToBgrx(Vector128<int> lum, Vector128<int> u, Vector128<int> v)
+    {
+        var c = (lum - Vector128.Create(16)) * 298 + Vector128.Create(128);
+        var zero = Vector128<int>.Zero;
+        var max = Vector128.Create(255);
+        var b = Vector128.Min(Vector128.Max(Vector128.ShiftRightArithmetic(c + u * 516, 8), zero), max);
+        var g = Vector128.Min(Vector128.Max(Vector128.ShiftRightArithmetic(c - u * 100 - v * 208, 8), zero), max);
+        var r = Vector128.Min(Vector128.Max(Vector128.ShiftRightArithmetic(c + v * 409, 8), zero), max);
+        return (b | (g << 8) | (r << 16)).AsUInt32() | Vector128.Create(0xFF000000);
+    }
+
+    /// <summary>8 pixels: luma and centred chroma as 16-bit lanes, widened (with sign) to two halves of 4.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static void Store8(Vector128<short> lum, Vector128<short> u, Vector128<short> v, uint* output)
+    {
+        ToBgrx(Vector128.WidenLower(lum), Vector128.WidenLower(u), Vector128.WidenLower(v)).Store(output);
+        ToBgrx(Vector128.WidenUpper(lum), Vector128.WidenUpper(u), Vector128.WidenUpper(v)).Store(output + 4);
+    }
+
+    /// <summary>A full-size row, 16 pixels at a time; returns how many pixels it did.</summary>
+    internal static int ConvertRowFull(byte* yRow, byte* uvRow, uint* outRow, int width)
+    {
+        if (!Vector128.IsHardwareAccelerated)
+            return 0;
+        var lowByte = Vector128.Create((ushort)0xFF);
+        var offset = Vector128.Create((ushort)128);
+        int x = 0;
+        for (; x + 16 <= width; x += 16)
+        {
+            var ys = Vector128.Load(yRow + x);
+            var uv = Vector128.Load((ushort*)(uvRow + x)); // 8 pairs: U in the low byte, V in the high
+            var u = ((uv & lowByte) - offset).AsInt16();
+            var v = ((uv >> 8) - offset).AsInt16();
+            // Each U/V pair colours two neighbouring pixels. (Constant patterns: one instruction each.)
+            Store8(Vector128.WidenLower(ys).AsInt16(),
+                   Vector128.Shuffle(u, Vector128.Create((short)0, 0, 1, 1, 2, 2, 3, 3)),
+                   Vector128.Shuffle(v, Vector128.Create((short)0, 0, 1, 1, 2, 2, 3, 3)), outRow + x);
+            Store8(Vector128.WidenUpper(ys).AsInt16(),
+                   Vector128.Shuffle(u, Vector128.Create((short)4, 4, 5, 5, 6, 6, 7, 7)),
+                   Vector128.Shuffle(v, Vector128.Create((short)4, 4, 5, 5, 6, 6, 7, 7)), outRow + x + 8);
+        }
+        return x;
+    }
+
+    /// <summary>A half-size row (2x2 luma averaged), 8 pixels at a time; returns how many it did.</summary>
+    internal static int ConvertRowHalf(byte* yRow, byte* uvRow, uint* outRow, int width, int stride)
+    {
+        if (!Vector128.IsHardwareAccelerated)
+            return 0;
+        var lowByte = Vector128.Create((ushort)0xFF);
+        var offset = Vector128.Create((ushort)128);
+        int x = 0;
+        for (; x + 8 <= width; x += 8)
+        {
+            // 16 luma bytes per row as 8 ushorts: low byte + high byte is a horizontal pair's sum.
+            var top = Vector128.Load((ushort*)(yRow + 2 * x));
+            var bottom = Vector128.Load((ushort*)(yRow + 2 * x + stride));
+            var lum = ((top & lowByte) + (top >> 8) + (bottom & lowByte) + (bottom >> 8) + Vector128.Create((ushort)2)) >> 2;
+            var uv = Vector128.Load((ushort*)(uvRow + 2 * x)); // one U/V pair per output pixel
+            Store8(lum.AsInt16(), ((uv & lowByte) - offset).AsInt16(), ((uv >> 8) - offset).AsInt16(), outRow + x);
+        }
+        return x;
+    }
 
     public void Dispose()
     {

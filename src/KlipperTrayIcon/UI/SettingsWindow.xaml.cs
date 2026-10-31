@@ -152,7 +152,7 @@ public partial class SettingsWindow : Window
     // ---- camera sources --------------------------------------------------------
 
     /// <summary>An entry in the camera lists; Name is what's saved (empty: automatic / none).</summary>
-    public sealed record SourceItem(string Name, string Label)
+    public sealed record SourceItem(string Name, string Label, string Description = "")
     {
         public override string ToString() => Label; // what screen readers announce
     }
@@ -197,6 +197,17 @@ public partial class SettingsWindow : Window
             FillStreams(view, kinds, Selected(streamCombo));
     }
 
+    private static string StreamDescription(StreamKind kind) => kind switch
+    {
+        StreamKind.Rtsp => "Compressed H.264 video over RTSP, the standard protocol for network cameras. " +
+                           "Smooth, with little delay and low network use.",
+        StreamKind.H264 => "Compressed H.264 video sent over HTTP. Low network use, like RTSP.",
+        StreamKind.Mjpeg => "A continuous series of JPEG pictures. Works with almost every camera, but uses much " +
+                            "more network bandwidth, especially at high resolutions.",
+        _ => "Single pictures, fetched about ten times a second. Works with any camera or screen that offers " +
+             "a snapshot, at a lower frame rate.",
+    };
+
     /// <summary>
     /// "Automatic (H.264)" plus each stream the camera offers. A saved choice
     /// it doesn't offer still shows, so it isn't lost. Off while the second
@@ -207,13 +218,19 @@ public partial class SettingsWindow : Window
         var combo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
         var items = new List<SourceItem>
         {
-            new("", kinds is { Count: > 0 } ? $"Automatic ({StreamKinds.Label(kinds[0])})" : "Automatic"),
+            kinds is { Count: > 0 }
+                ? new("", $"Automatic ({StreamKinds.Label(kinds[0])})",
+                      $"Uses {StreamKinds.Label(kinds[0])}, the best stream this camera offers." +
+                      (kinds[0] is StreamKind.Rtsp or StreamKind.H264 ? " Switches to MJPEG if it keeps dropping." : ""))
+                : new("", "Automatic", "Uses the best stream the camera offers."),
         };
         foreach (var kind in kinds ?? [])
-            items.Add(new SourceItem(StreamKinds.ToConfig(kind), StreamKinds.Label(kind)));
+            items.Add(new SourceItem(StreamKinds.ToConfig(kind), StreamKinds.Label(kind), StreamDescription(kind)));
         if (StreamKinds.Parse(selected) is { } saved && !items.Exists(i => i.Name == StreamKinds.ToConfig(saved)))
             items.Add(new SourceItem(StreamKinds.ToConfig(saved),
-                                     kinds == null ? StreamKinds.Label(saved) : $"{StreamKinds.Label(saved)} · not offered"));
+                                     kinds == null ? StreamKinds.Label(saved) : $"{StreamKinds.Label(saved)} · not offered",
+                                     kinds == null ? StreamDescription(saved)
+                                                   : "The camera didn't offer this when asked; Automatic is used instead."));
         combo.ItemsSource = items;
         combo.SelectedItem = items.Find(i => i.Name == (StreamKinds.Parse(selected) is { } k ? StreamKinds.ToConfig(k) : "")) ?? items[0];
         combo.IsEnabled = view == CameraView.Main || Selected(SecondViewCombo).Length > 0;
@@ -275,6 +292,14 @@ public partial class SettingsWindow : Window
             await LoadSourcesAsync(config);
         TestButton.IsEnabled = true;
         _testing = false;
+    }
+
+    /// <summary>IsCancel only closes a dialog (first run); from the tray menu the window isn't one.</summary>
+    private void OnCancelClick(object sender, RoutedEventArgs e)
+    {
+        if (_firstRun)
+            DialogResult = false;
+        Close();
     }
 
     private void OnSaveClick(object sender, RoutedEventArgs e)

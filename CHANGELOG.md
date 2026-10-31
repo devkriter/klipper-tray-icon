@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.4.0] - 2026-10-31
+### Added
+- **RTSP** in the stream picker, for camera-streamer with RTSP turned on (in Crowsnest:
+  `enable_rtsp: true` and `rtsp_port: 8554` in `crowsnest.conf`). The app finds it through
+  camera-streamer's status page, and *Automatic* tries it first: H.264 like `video.h264`, through
+  camera-streamer's separate RTSP server. If it keeps dropping, *Automatic* switches to MJPEG.
+  Config value: `rtsp`.
+- After switching from RTSP or H.264 to MJPEG, *Automatic* tries the better stream again after
+  5 minutes, so a passing outage (like a camera service restarting) doesn't cost it for good.
+- **Full-resolution H.264** when the popup is big enough to show it (pinned, snapped, maximized).
+  At the default size the picture is still converted at half size, since that's all the screen
+  shows; the switch happens as you resize, without reconnecting.
+- H.264 pictures are converted to screen colours with SIMD: about 8× faster (a 1080p frame in
+  ~2 ms instead of ~19 ms), so full resolution costs less than half did before.
+- Each stream in the Settings dropdowns has a short description of what it is and what it costs.
+
+### Fixed
+- RTSP cameras that send a packet before answering PLAY (LIVE555, which camera-streamer uses) were
+  rejected; the app now keeps any video that arrives early and skips the rest.
+- **Cancel** now closes the settings window when it was opened from the tray menu.
+- **Printers with several extruders** (toolchangers like the Snapmaker U1, IDEX): the nozzle tile
+  shows the extruder in use, labelled e.g. "NOZZLE T2", instead of always the first one.
+
 ## [2.3.0] - 2026-10-31
 ### Added
 - **Stream picker** next to each camera in Settings (Klipper). The app finds out what each camera

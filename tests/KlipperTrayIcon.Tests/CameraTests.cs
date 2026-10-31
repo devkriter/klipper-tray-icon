@@ -281,15 +281,18 @@ internal sealed class FakeRtspsCamera : IDisposable
     private const int MaxPayload = 1200;
     private readonly TcpListener _listener;
     private readonly X509Certificate2 _cert;
-    private readonly string _accessCode;
+    private readonly string? _accessCode; // null: no login, like camera-streamer
+    private readonly bool _tls;
     private readonly List<List<byte[]>> _accessUnits;
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource _clientGone = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public FakeRtspsCamera(string accessCode, string clipPath, int port = 0)
+    /// <summary>Bambu-style by default (RTSPS with a login); tls false and no access code is plain RTSP.</summary>
+    public FakeRtspsCamera(string? accessCode, string clipPath, int port = 0, bool tls = true)
     {
         _listener = new TcpListener(IPAddress.Loopback, port);
         _accessCode = accessCode;
+        _tls = tls;
         _accessUnits = SplitAccessUnits(File.ReadAllBytes(clipPath));
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=bambu-camera-fake", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -326,8 +329,14 @@ internal sealed class FakeRtspsCamera : IDisposable
 
     private async Task ServeAsync(TcpClient client)
     {
-        using var ssl = new SslStream(client.GetStream());
-        await ssl.AuthenticateAsServerAsync(_cert);
+        Stream ssl = client.GetStream();
+        if (_tls)
+        {
+            var tls = new SslStream(ssl);
+            await tls.AuthenticateAsServerAsync(_cert);
+            ssl = tls;
+        }
+        await using var _ = ssl;
         var reader = new StreamReader(ssl, Encoding.ASCII);
         var writeLock = new SemaphoreSlim(1, 1);
         bool playing = false;
@@ -371,6 +380,13 @@ internal sealed class FakeRtspsCamera : IDisposable
                 }
                 else
                     response = $"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n\r\n";
+                if (method == "PLAY" && !_tls)
+                {
+                    // Like LIVE555 (camera-streamer's RTSP server): an RTCP sender report on
+                    // the second channel arrives before the answer to PLAY.
+                    byte[] report = [0x80, 200, 0, 6, 1, 2, 3, 4, .. new byte[20]];
+                    await WriteAsync(ssl, writeLock, [(byte)'$', 1, 0, (byte)report.Length, .. report]);
+                }
                 await WriteAsync(ssl, writeLock, Encoding.ASCII.GetBytes(response));
 
                 if (method == "PLAY" && !playing)
@@ -392,13 +408,15 @@ internal sealed class FakeRtspsCamera : IDisposable
 
     private bool IsAuthorized(string method, string url, string? authorization)
     {
+        if (_accessCode == null)
+            return true;
         if (authorization == null)
             return false;
         string expected = RtspClient.Authorization($"Digest realm=\"{Realm}\", nonce=\"{Nonce}\"", method, url, "bblp", _accessCode);
         return authorization == expected;
     }
 
-    private async Task StreamAsync(SslStream ssl, SemaphoreSlim writeLock, CancellationToken ct)
+    private async Task StreamAsync(Stream ssl, SemaphoreSlim writeLock, CancellationToken ct)
     {
         ushort seq = 1000;
         uint timestamp = 0;

@@ -157,6 +157,31 @@ public class MoonrakerTests
     }
 
     [Fact]
+    public async Task NozzleFollowsTheActiveToolOnToolchangers()
+    {
+        // A toolchanger (e.g. Snapmaker U1) printing with T2: the first poll only learns
+        // which extruder is in use; from the next one the nozzle tile shows that one.
+        var queries = new List<string>();
+        var http = Stub(path =>
+        {
+            if (!path.StartsWith("/printer/objects/query"))
+                return path.StartsWith("/server/files/metadata") ? """{"result":{}}""" : null;
+            queries.Add(path);
+            return """
+                {"result":{"status":{"print_stats":{"state":"printing","filename":"a.gcode"},
+                 "toolhead":{"extruder":"extruder2"},
+                 "extruder":{"temperature":25,"target":0},"extruder2":{"temperature":219.6,"target":220}}}}
+                """;
+        });
+        var backend = new MoonrakerBackend("p", http: http);
+        var first = (await backend.GetStatusAsync(default)).Details!;
+        var second = (await backend.GetStatusAsync(default)).Details!;
+        Assert.Equal((new Heater(25, 0), "T0"), (first.Nozzle, first.Tool));
+        Assert.Equal((new Heater(219.6, 220), "T2"), (second.Nozzle, second.Tool));
+        Assert.Contains("&extruder2=temperature,target", queries[1]);
+    }
+
+    [Fact]
     public async Task WorksOutLayersFromZWhenKlipperDoesNotKnow()
     {
         // No SET_PRINT_STATS_INFO from the slicer: info fields are null.

@@ -592,7 +592,9 @@ public partial class WebcamPopup : Window
                     SetBadge("Live video unavailable · showing last snapshot");
                 else
                 {
-                    Placeholder.Text = _view == CameraView.Main ? "Camera unavailable" : _backend.SecondViewName + " unavailable";
+                    Placeholder.Text = _view == CameraView.Main ? "Camera unavailable"
+                        : _backend.SecondViewHelp is string help ? $"{_backend.SecondViewName} unavailable\n{help}"
+                        : _backend.SecondViewName + " unavailable";
                     Placeholder.Visibility = Visibility.Visible;
                 }
                 break;

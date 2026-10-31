@@ -57,8 +57,9 @@ public class WebcamSourceTests
     public async Task RemoteScreenIsPolledAndTakesTaps()
     {
         var requests = new List<string>();
-        var backend = new MoonrakerBackend("p", http: U1Printer(requests), secondViewName: "gui");
-        Assert.Equal("gui", backend.SecondViewName);
+        // U1 Extended: the second view is the touchscreen, at its known address.
+        var backend = new MoonrakerBackend("p", http: U1Printer(requests), remoteScreen: true);
+        Assert.Equal("Touchscreen", backend.SecondViewName);
 
         var source = await backend.GetViewSourceAsync(CameraView.Second, default);
         Assert.Equal(new ViewSource(null, "http://p/screen/snapshot", "http://p/screen/touch", StreamKind.Snapshots), source);
@@ -75,6 +76,24 @@ public class WebcamSourceTests
         await backend.SendTouchAsync(CameraView.Second, TouchAction.Up, 10, 20, default);
         Assert.Equal(["POST /screen/touch?a=down&x=10&y=20", "POST /screen/touch?a=up&x=10&y=20"],
                      requests.Where(r => r.StartsWith("POST")));
+    }
+
+    [Fact]
+    public async Task KlipperTypeNeverSendsTaps()
+    {
+        // Plain Klipper: a second view is just another camera, even a U1's touchscreen.
+        var backend = new MoonrakerBackend("p", http: U1Printer(new()), secondViewName: "gui");
+        Assert.Equal(new ViewSource(null, "http://p/screen/snapshot", null, StreamKind.Snapshots),
+                     await backend.GetViewSourceAsync(CameraView.Second, default));
+        Assert.False(backend.IsTouchable(CameraView.Second));
+    }
+
+    [Fact]
+    public async Task RecognisesAU1()
+    {
+        var webcams = await new MoonrakerBackend("p", http: U1Printer(new())).ListWebcamsAsync(default);
+        Assert.True(MoonrakerBackend.LooksLikeU1(webcams));
+        Assert.False(MoonrakerBackend.LooksLikeU1([new WebcamInfo("Chamber", "webrtc-camerastreamer", "/webcam/webrtc", "")]));
     }
 
     [Fact]

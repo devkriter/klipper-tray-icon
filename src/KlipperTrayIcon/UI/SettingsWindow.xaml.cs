@@ -38,7 +38,8 @@ public partial class SettingsWindow : Window
             CancelButton.Content = "Quit";
         }
 
-        (config.IsBambu ? BambuRadio : KlipperRadio).IsChecked = true;
+        (config.IsBambu ? BambuRadio : config.IsU1 ? U1Radio : KlipperRadio).IsChecked = true;
+        TouchscreenCheck.IsChecked = config.U1Touchscreen;
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
@@ -62,14 +63,41 @@ public partial class SettingsWindow : Window
     // ---- form behaviour ----------------------------------------------------
 
     private bool IsBambu => BambuRadio.IsChecked == true;
+    private bool IsU1 => U1Radio.IsChecked == true;
 
     private void OnTypeChanged(object sender, RoutedEventArgs e)
     {
-        if (KlipperPanel == null)
+        if (KlipperPanel == null || TouchscreenCheck == null)
             return; // still loading
         KlipperPanel.Visibility = IsBambu ? Visibility.Collapsed : Visibility.Visible;
         BambuPanel.Visibility = IsBambu ? Visibility.Visible : Visibility.Collapsed;
+        // A U1 has its touchscreen where Klipper has a second camera.
+        var second = IsU1 ? Visibility.Collapsed : Visibility.Visible;
+        SecondViewLabel.Visibility = SecondViewCombo.Visibility = SecondViewStreamCombo.Visibility = second;
+        TouchscreenCheck.Visibility = IsU1 ? Visibility.Visible : Visibility.Collapsed;
+        AddressHint.Text = IsU1
+            ? "The printer's address, e.g. 192.168.1.60"
+            : "The address you open Mainsail or Fluidd at, e.g. mainsail.local or 192.168.1.50";
+        UpdateSourcesHint();
         TestResult.Text = "";
+    }
+
+    private void UpdateSourcesHint()
+    {
+        if (IsU1)
+            SourcesHint.Text = "The touchscreen needs paxx12's extended firmware with Remote Screen turned on " +
+                               "(http://<printer>/firmware-config). In the popup, a button switches to it; touch starts " +
+                               "locked, so the screen is view-only until you unlock it.";
+        else if (_webcams == null)
+            SourcesHint.Text = "Test connection lists the printer's cameras and the streams each one offers. " +
+                               "The webcam popup gets a button to switch to the second camera.";
+        else if (_webcams.Count == 0)
+            SourcesHint.Text = "The printer has no cameras set up (in Mainsail/Fluidd: Settings → Webcams).";
+        else if (MoonrakerBackend.LooksLikeU1(_webcams))
+            SourcesHint.Text = "This looks like a Snapmaker U1 with the extended firmware: choose U1 Extended above to use its touchscreen.";
+        else
+            SourcesHint.Text = "Next to each camera: how it's fetched (only what it offers is listed). " +
+                               "The webcam popup gets a button to switch to the second camera.";
     }
 
     private void OnShowApiKeyChanged(object sender, RoutedEventArgs e) =>
@@ -109,7 +137,7 @@ public partial class SettingsWindow : Window
     private AppConfig? Collect()
     {
         var config = _original.Clone();
-        config.PrinterType = IsBambu ? "bambu" : "klipper";
+        config.PrinterType = IsBambu ? "bambu" : IsU1 ? "u1" : "klipper";
         if (!IsBambu)
         {
             string url = MoonrakerBackend.NormalizeUrl(UrlBox.Text);
@@ -126,6 +154,7 @@ public partial class SettingsWindow : Window
             config.SecondViewName = Selected(SecondViewCombo);
             config.WebcamStream = Selected(CameraStreamCombo);
             config.SecondViewStream = Selected(SecondViewStreamCombo);
+            config.U1Touchscreen = TouchscreenCheck.IsChecked == true;
         }
         else
         {
@@ -266,10 +295,7 @@ public partial class SettingsWindow : Window
         Fill(CameraCombo, Items(webcams, new SourceItem("", automatic), camera), camera);
         Fill(SecondViewCombo, Items(webcams, new SourceItem("", "None"), secondView), secondView);
         _filling = false;
-        if (webcams != null)
-            SourcesHint.Text = webcams.Count == 0
-                ? "The printer has no cameras set up (in Mainsail/Fluidd: Settings → Webcams)."
-                : "Next to each camera: how it's fetched (only what it offers is listed). The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen.";
+        UpdateSourcesHint();
     }
 
     private void Warn(string title, string text) =>

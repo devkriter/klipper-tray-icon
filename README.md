@@ -16,9 +16,10 @@ The icon updates dynamically to show a circular progress bar corresponding to th
 - **Status at a glance**: hover or right-click the icon to see progress, time left, ETA and the
   file being printed.
 - **Choose the camera, and a second view** (Klipper): pick any of the printer's webcams in
-  Settings, plus a second one to switch to from the popup. Remote touchscreens (e.g. the
-  [Snapmaker U1's](#snapmaker-u1-support)) can be used right in the popup, once you unlock touch
-  with the lock button (it starts locked, so a stray click can't press anything).
+  Settings, plus a second one to switch to from the popup.
+- **Snapmaker U1 touchscreen** (the *U1 Extended* type): see and use the printer's screen right in
+  the popup, once you unlock touch with the lock button (it starts locked, so a stray click can't
+  press anything). See [Snapmaker U1 Support](#snapmaker-u1-support).
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
   can be turned off in Settings.
@@ -83,8 +84,9 @@ your PC.
 
 1. Install paxx12's extended firmware on the U1. To see the touchscreen, turn on **Remote Screen**
    in the firmware's settings page (`http://<printer>/firmware-config`).
-2. On first run, choose "Klipper" and enter the printer's address.
-3. In **Settings**, set **Camera** to `case` (or leave it on Automatic) and **Second view** to `gui`.
+2. On first run (or in **Settings**), choose **U1 Extended** and enter the printer's address.
+3. Leave **Show the printer's touchscreen in the webcam popup, and let me use it** ticked. The
+   camera can stay on Automatic.
 4. In the webcam popup, the view button in the title bar switches between the camera and the
    touchscreen. Touch starts **locked** (view only): click the lock to use the screen, and the
    picture gets an amber outline while your clicks go to the printer. It locks again when the
@@ -93,7 +95,8 @@ your PC.
 Under the hood: the U1 lists its camera as WebRTC, which the app can't show, so it uses the MJPEG
 stream the firmware serves next to it (`/webcam/stream.mjpg`, about 12 fps). The touchscreen
 is shown by refreshing its snapshot about ten times a second (unchanged frames cost almost nothing),
-and taps go to the firmware's remote-screen touch endpoint. The U1's camera hangs up every few
+and taps go to the firmware's remote-screen touch endpoint (`/screen/touch`). Only the U1 Extended
+type does that: with the plain Klipper type, a second view is always just another camera. The U1's camera hangs up every few
 seconds at full frame rate; the app reconnects at once without interrupting the picture.
 
 Verified against a real U1: the camera and the touchscreen both show and switch. Taps are covered

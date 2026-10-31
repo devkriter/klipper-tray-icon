@@ -30,11 +30,15 @@ public sealed class AppConfig
     /// <summary>How to fetch each: "h264", "mjpeg" or "snapshots"; empty picks the best one the camera offers.</summary>
     [JsonPropertyName("webcam_stream")] public string WebcamStream { get; set; } = "";
     [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
+    /// <summary>Snapmaker U1: show its touchscreen (Remote Screen) in the popup, and send it taps.</summary>
+    [JsonPropertyName("u1_touchscreen")] public bool U1Touchscreen { get; set; } = true;
 
     /// <summary>Keys this version doesn't know about, kept so saving doesn't drop them.</summary>
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 
     [JsonIgnore] public bool IsBambu => string.Equals(PrinterType, "bambu", StringComparison.OrdinalIgnoreCase);
+    /// <summary>A Snapmaker U1 with paxx12's extended firmware: Klipper, plus its touchscreen.</summary>
+    [JsonIgnore] public bool IsU1 => string.Equals(PrinterType, "u1", StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
     public TimeSpan UpdateInterval => TimeSpan.FromSeconds(Math.Clamp(UpdateIntervalSeconds, 1, 60));

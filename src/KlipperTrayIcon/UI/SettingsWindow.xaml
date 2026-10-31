@@ -64,6 +64,8 @@
         <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
             <RadioButton x:Name="KlipperRadio" Content="Klipper (Mainsail / Fluidd)" GroupName="Type"
                          Margin="0,0,24,0" Checked="OnTypeChanged" />
+            <RadioButton x:Name="U1Radio" Content="U1 Extended" GroupName="Type" Margin="0,0,24,0"
+                         Checked="OnTypeChanged" ToolTip="Snapmaker U1 with paxx12's extended firmware (it requires it): Klipper, plus the printer's touchscreen" />
             <RadioButton x:Name="BambuRadio" Content="Bambu Lab" GroupName="Type" Checked="OnTypeChanged" />
         </StackPanel>
 
@@ -88,7 +90,7 @@
 
             <TextBlock Text="Address" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="UrlBox" Grid.Column="1" Grid.ColumnSpan="2" />
-            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+            <TextBlock x:Name="AddressHint" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="The address you open Mainsail or Fluidd at, e.g. mainsail.local or 192.168.1.50" />
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
@@ -132,13 +134,16 @@
             <!-- How each camera is fetched: whatever the printer turned out to offer. -->
             <ComboBox x:Name="CameraStreamCombo" Grid.Row="4" Grid.Column="2" Width="170" Margin="8,0,0,8"
                       ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
-            <TextBlock Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
+            <TextBlock x:Name="SecondViewLabel" Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1"
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
             <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="5" Grid.Column="2" Width="170" Margin="8,0,0,0"
                       ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
+            <!-- Snapmaker U1, in place of the second view: its touchscreen. -->
+            <CheckBox x:Name="TouchscreenCheck" Grid.Row="5" Grid.ColumnSpan="3" Visibility="Collapsed"
+                      Content="Show the printer's touchscreen in the webcam popup, and let me use it" />
             <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
-                       Text="Test connection lists the printer's cameras and the streams each one offers. The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen." />
+                       Text="Test connection lists the printer's cameras and the streams each one offers." />
 
             <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,4"
                       Content="Show the Klipper console next to the webcam" />

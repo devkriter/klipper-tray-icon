@@ -34,7 +34,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
 
     public MoonrakerBackend(string moonrakerUrl, string apiKey = "", HttpClient? http = null,
                             string webcamName = "", string secondViewName = "",
-                            string webcamStream = "", string secondViewStream = "")
+                            string webcamStream = "", string secondViewStream = "", bool remoteScreen = false)
     {
         BaseUrl = NormalizeUrl(moonrakerUrl);
         ApiKey = (apiKey ?? "").Trim();
@@ -47,7 +47,12 @@ public sealed class MoonrakerBackend : IPrinterBackend
         _secondViewName = (secondViewName ?? "").Trim();
         _preferredStream[(int)CameraView.Main] = StreamKinds.Parse(webcamStream);
         _preferredStream[(int)CameraView.Second] = StreamKinds.Parse(secondViewStream);
+        _remoteScreen = remoteScreen;
     }
+
+    // Snapmaker U1 (paxx12's extended firmware): the second view is the printer's
+    // touchscreen, served as a snapshot at /screen/snapshot that takes taps at /screen/touch.
+    private readonly bool _remoteScreen;
 
     public string BaseUrl { get; }
     public string ApiKey { get; }
@@ -285,7 +290,18 @@ public sealed class MoonrakerBackend : IPrinterBackend
     // popup doesn't take a still touchscreen for a stalled stream.
     private static readonly TimeSpan PollKeepAlive = TimeSpan.FromSeconds(5);
 
-    public string? SecondViewName => _secondViewName.Length > 0 ? _secondViewName : null;
+    public string? SecondViewName => _remoteScreen ? "Touchscreen" : _secondViewName.Length > 0 ? _secondViewName : null;
+
+    public string? SecondViewHelp => _remoteScreen
+        ? "Turn on Remote Screen in the printer's firmware settings (/firmware-config)"
+        : null;
+
+    /// <summary>
+    /// Whether a webcam list looks like a Snapmaker U1 with paxx12's firmware (its
+    /// touchscreen is an iframe at /screen/), for Settings to suggest the U1 type.
+    /// </summary>
+    public static bool LooksLikeU1(IReadOnlyList<WebcamInfo> webcams) =>
+        webcams.Any(c => c.Service == "iframe" && c.StreamUrl.TrimStart('/').StartsWith("screen", StringComparison.OrdinalIgnoreCase));
 
     private string Absolute(string path) =>
         path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path
@@ -334,6 +350,9 @@ public sealed class MoonrakerBackend : IPrinterBackend
         }
         if (_views[(int)view] is { } cached)
             return cached;
+        if (view == CameraView.Second && _remoteScreen)
+            return _views[(int)view] = new ViewSource(null, BaseUrl + "/screen/snapshot", BaseUrl + "/screen/touch",
+                                                       StreamKind.Snapshots);
         string wanted = view == CameraView.Main ? _webcamName : _secondViewName;
         if (view == CameraView.Second && wanted.Length == 0)
             return null;
@@ -375,7 +394,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
     {
         if (PickCamera(await ListWebcamsAsync(ct), cameraName, view) is not { } cam)
             return [];
-        var (streams, _, _) = await DiscoverAsync(cam, ct);
+        var (streams, _) = await DiscoverAsync(cam, ct);
         return streams.Select(s => s.Kind).ToList();
     }
 
@@ -386,11 +405,11 @@ public sealed class MoonrakerBackend : IPrinterBackend
     /// </summary>
     private async Task<(ViewSource Source, bool Certain)> ResolveAsync(WebcamInfo cam, StreamKind? preferred, CancellationToken ct)
     {
-        var (streams, touch, certain) = await DiscoverAsync(cam, ct);
+        var (streams, certain) = await DiscoverAsync(cam, ct);
         var pick = streams.FirstOrDefault(s => s.Kind == preferred) ?? streams[0];
         string snapshot = streams[^1].Url; // snapshots are always last
         if (pick.Kind == StreamKind.Snapshots)
-            return (new ViewSource(null, snapshot, touch, StreamKind.Snapshots), certain);
+            return (new ViewSource(null, snapshot, null, StreamKind.Snapshots), certain);
         // Automatic RTSP or H.264 keeps MJPEG in reserve, in case they turn out unreliable.
         string? fallback = preferred == null && pick.Kind is StreamKind.Rtsp or StreamKind.H264
             ? streams.FirstOrDefault(s => s.Kind == StreamKind.Mjpeg)?.Url
@@ -404,10 +423,9 @@ public sealed class MoonrakerBackend : IPrinterBackend
     /// hardware-encoded video as video.h264; both are a fraction of MJPEG's
     /// bandwidth), MJPEG, and polling its snapshot, which is always offered. WebRTC/HLS/iframe views need a browser, but the servers behind
     /// them (camera-streamer, paxx12's firmware for the Snapmaker U1) usually
-    /// serve one of these next to them. Touch is the remote screen's tap URL
-    /// if the view is one (paxx12's page sends taps to "touch" next to it).
+    /// serve one of these next to them.
     /// </summary>
-    internal async Task<(List<StreamChoice> Streams, string? Touch, bool Certain)> DiscoverAsync(WebcamInfo cam, CancellationToken ct)
+    internal async Task<(List<StreamChoice> Streams, bool Certain)> DiscoverAsync(WebcamInfo cam, CancellationToken ct)
     {
         string stream = Absolute(cam.StreamUrl);
         string snapshot = cam.SnapshotUrl.Length > 0 ? Absolute(cam.SnapshotUrl) : stream.Replace("action=stream", "action=snapshot");
@@ -417,8 +435,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
         var rtsp = FindRtspAsync(folder, ct);
         var h264 = IsH264Async(h264Url, ct);
         var mjpeg = FindMjpegAsync(cam, stream, folder, ct);
-        var touch = PageMentionsAsync(stream, "touch?a=", ct);
-        await Task.WhenAll(rtsp, h264, mjpeg, touch);
+        await Task.WhenAll(rtsp, h264, mjpeg);
 
         var streams = new List<StreamChoice>();
         if (rtsp.Result.Url is string rtspUrl)
@@ -428,8 +445,8 @@ public sealed class MoonrakerBackend : IPrinterBackend
         if (mjpeg.Result.Url is string mjpegUrl)
             streams.Add(new StreamChoice(StreamKind.Mjpeg, mjpegUrl));
         streams.Add(new StreamChoice(StreamKind.Snapshots, snapshot));
-        bool certain = rtsp.Result.Certain && h264.Result != null && mjpeg.Result.Certain && touch.Result != null;
-        return (streams, touch.Result == true ? folder + "touch" : null, certain);
+        bool certain = rtsp.Result.Certain && h264.Result != null && mjpeg.Result.Certain;
+        return (streams, certain);
     }
 
     /// <summary>
@@ -566,25 +583,6 @@ public sealed class MoonrakerBackend : IPrinterBackend
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             return response.IsSuccessStatusCode
                    && response.Content.Headers.ContentType?.MediaType?.StartsWith("multipart/", StringComparison.OrdinalIgnoreCase) == true;
-        }
-        catch (Exception) when (!ct.IsCancellationRequested)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>Whether the web page at the URL contains the text; null if it couldn't be fetched.</summary>
-    private async Task<bool?> PageMentionsAsync(string url, string text, CancellationToken ct)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(3));
-        try
-        {
-            using var request = Request(HttpMethod.Get, url);
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "text/html")
-                return false; // not a page (maybe a stream): don't download it
-            return (await response.Content.ReadAsStringAsync(cts.Token)).Contains(text, StringComparison.Ordinal);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

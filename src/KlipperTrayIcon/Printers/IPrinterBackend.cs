@@ -22,6 +22,8 @@ public interface IPrinterBackend : IDisposable
 
     /// <summary>Name of the second view the popup can switch to (e.g. the printer's touchscreen), or null.</summary>
     string? SecondViewName { get; }
+    /// <summary>What to check when the second view can't be shown, or null.</summary>
+    string? SecondViewHelp => null;
 
     /// <summary>
     /// How many screen pixels wide the popup shows the video (0: unknown).
@@ -74,9 +76,14 @@ public static class PrinterBackends
     public static IPrinterBackend Create(AppConfig config) =>
         config.IsBambu
             ? new BambuBackend(config.BambuIp, config.BambuSerial, config.BambuAccessCode)
-            : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
-                                   webcamName: config.WebcamName, secondViewName: config.SecondViewName,
-                                   webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream);
+            : config.IsU1
+                // Klipper, plus the touchscreen as the second view (instead of a second camera).
+                ? new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
+                                       webcamName: config.WebcamName, webcamStream: config.WebcamStream,
+                                       remoteScreen: config.U1Touchscreen)
+                : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
+                                       webcamName: config.WebcamName, secondViewName: config.SecondViewName,
+                                       webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream);
 
     /// <summary>The printer's cameras, for the settings window. Throws if it can't be reached.</summary>
     public static async Task<IReadOnlyList<WebcamInfo>> ListWebcamsAsync(AppConfig config, CancellationToken ct = default)

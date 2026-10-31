@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.0] - 2026-10-31
+### Added
+- **U1 Extended** printer type, for the Snapmaker U1 with paxx12's extended firmware (it's
+  required). It's Klipper plus one clear option, *Show the printer's touchscreen in the webcam
+  popup, and let me use it*, in place of the second camera. The touchscreen is found at its known
+  address, not guessed from the webcam list. If it doesn't show, the popup says to turn on Remote
+  Screen. Config: `"printer_type": "u1"`, `u1_touchscreen`.
+
+### Changed
+- With the **Klipper** type, a second view is always just another camera: clicks never go to the
+  printer. Settings suggests U1 Extended when the printer looks like a U1. *Already using a U1
+  with the Klipper type and `gui` as the second view? Switch to U1 Extended to keep using its
+  touchscreen.*
+
 ## [2.4.0] - 2026-10-31
 ### Added
 - **RTSP** in the stream picker, for camera-streamer with RTSP turned on (in Crowsnest:

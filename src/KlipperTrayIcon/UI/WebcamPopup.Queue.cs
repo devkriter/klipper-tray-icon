@@ -15,7 +15,8 @@ using KlipperTrayIcon.Printers;
 namespace KlipperTrayIcon.UI;
 
 /// <summary>One file in the queue panel: a queued job, or a recent upload.</summary>
-public sealed record QueueRow(string Path, string Name, string Detail, ImageSource? Thumbnail, string JobId = "");
+public sealed record QueueRow(string Path, string Name, string Detail, ImageSource? Thumbnail, ImageSource? Preview,
+                              string JobId = "");
 
 /// <summary>
 /// The print queue panel, which takes the console's place when its title-bar
@@ -124,7 +125,7 @@ public partial class WebcamPopup
             {
                 var d = details.GetValueOrDefault(j.Path);
                 return new QueueRow(j.Path, DisplayName(j.Path), d?.EstimatedSeconds is double t ? StatusText.FormatDuration(t) : "",
-                                    Thumbnail(j.Path, d), j.JobId);
+                                    Image(j.Path, d?.Thumbnail), Image(j.Path + "#preview", d?.Preview), j.JobId);
             }));
         }
         Replace(_recentRows, recent.Select(f =>
@@ -132,7 +133,7 @@ public partial class WebcamPopup
             var d = details.GetValueOrDefault(f.Path);
             string age = Ago(DateTimeOffset.FromUnixTimeMilliseconds((long)(f.Modified * 1000)));
             string detail = d?.EstimatedSeconds is double t ? $"{StatusText.FormatDuration(t)} · {age}" : age;
-            return new QueueRow(f.Path, DisplayName(f.Path), detail, Thumbnail(f.Path, d));
+            return new QueueRow(f.Path, DisplayName(f.Path), detail, Image(f.Path, d?.Thumbnail), Image(f.Path + "#preview", d?.Preview));
         }));
         QueueEmpty.Visibility = status.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         QueueHeader.Text = status.Jobs.Count switch { 0 => "QUEUE", 1 => "QUEUE · 1 job", var n => $"QUEUE · {n} jobs" };
@@ -150,15 +151,16 @@ public partial class WebcamPopup
             rows.Add(row);
     }
 
-    private ImageSource? Thumbnail(string path, GcodeDetails? details)
+    /// <summary>Decodes a thumbnail once and reuses it, so unchanged rows stay equal and don't rebuild.</summary>
+    private ImageSource? Image(string key, byte[]? bytes)
     {
-        if (details?.Thumbnail is not { } bytes)
+        if (bytes == null)
             return null;
-        if (_thumbnails.TryGetValue(path, out var cached) && cached.Bytes == bytes)
+        if (_thumbnails.TryGetValue(key, out var cached) && cached.Bytes == bytes)
             return cached.Image;
         if (TryDecode(bytes) is not { } image)
             return null;
-        _thumbnails[path] = (bytes, image);
+        _thumbnails[key] = (bytes, image);
         return image;
     }
 

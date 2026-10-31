@@ -31,5 +31,5 @@ public sealed record QueuedJob(string JobId, string Path);
 /// <summary>A file in the printer's G-code folder; Modified is Unix time in seconds.</summary>
 public sealed record GcodeFile(string Path, double Modified);
 
-/// <summary>Thumbnail is PNG or JPEG bytes.</summary>
-public sealed record GcodeDetails(double? EstimatedSeconds, byte[]? Thumbnail);
+/// <summary>Thumbnail (for the list) and Preview (the biggest, for hovering) are PNG or JPEG bytes.</summary>
+public sealed record GcodeDetails(double? EstimatedSeconds, byte[]? Thumbnail, byte[]? Preview = null);

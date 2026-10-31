@@ -320,16 +320,16 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
         using var doc = await GetJsonAsync("/server/files/metadata?filename=" + Uri.EscapeDataString(path),
                                            TimeSpan.FromSeconds(3), ct);
         var meta = doc.RootElement.Prop("result");
-        byte[]? thumbnail = null;
-        if (PickThumbnail(meta) is string relative)
-        {
-            // Thumbnails sit next to the file (e.g. ".thumbs/name-48x48.png").
-            string folder = path.Contains('/') ? path[..(path.LastIndexOf('/') + 1)] : "";
-            string url = BaseUrl + "/server/files/gcodes/" +
-                         string.Join("/", (folder + relative).Split('/').Select(Uri.EscapeDataString));
-            thumbnail = (await FetchImageAsync(url, null, TimeSpan.FromSeconds(3), ct)).Image;
-        }
-        var details = new GcodeDetails(meta.Num("estimated_time") is > 0 and var t ? t : null, thumbnail);
+        // Thumbnails sit next to the file (e.g. ".thumbs/name-48x48.png").
+        string folder = path.Contains('/') ? path[..(path.LastIndexOf('/') + 1)] : "";
+        async Task<byte[]?> Fetch(string? relative) => relative == null ? null
+            : (await FetchImageAsync(BaseUrl + "/server/files/gcodes/" +
+                                     string.Join("/", (folder + relative).Split('/').Select(Uri.EscapeDataString)),
+                                     null, TimeSpan.FromSeconds(3), ct)).Image;
+        string? small = PickThumbnail(meta), big = PickPreview(meta);
+        byte[]? thumbnail = await Fetch(small);
+        byte[]? preview = big == small ? thumbnail : await Fetch(big);
+        var details = new GcodeDetails(meta.Num("estimated_time") is > 0 and var t ? t : null, thumbnail, preview);
         lock (_details)
             _details[path] = details;
         return details;
@@ -347,6 +347,19 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
             .ToList();
         var fitting = all.Where(t => t.Width >= 48).OrderBy(t => t.Width).ToList();
         return fitting.Count > 0 ? fitting[0].Path : all.OrderByDescending(t => t.Width).Select(t => t.Path).FirstOrDefault();
+    }
+
+    /// <summary>The biggest thumbnail, shown when hovering over the small one.</summary>
+    internal static string? PickPreview(JsonElement meta)
+    {
+        var thumbs = meta.Prop("thumbnails");
+        return thumbs.ValueKind != JsonValueKind.Array ? null
+            : thumbs.EnumerateArray()
+                .Select(t => (Width: t.Num("width"), Path: t.Str("relative_path")))
+                .Where(t => t.Path.Length > 0)
+                .OrderByDescending(t => t.Width)
+                .Select(t => t.Path)
+                .FirstOrDefault();
     }
 
     public Task AddToQueueAsync(string path, CancellationToken ct) =>

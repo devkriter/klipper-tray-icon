@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.7.1] - 2026-10-31
+### Added
+- Print queue: hover over a thumbnail for a larger preview (the slicer's biggest thumbnail), after
+  a short delay like a tooltip. Moving to another thumbnail while it's open switches straight away.
+
 ## [2.7.0] - 2026-10-31
 ### Added
 - **Print queue** in the webcam popup (Klipper and U1 Extended; off by default, turn it on in

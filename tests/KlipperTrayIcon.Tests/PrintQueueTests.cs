@@ -12,6 +12,7 @@ namespace KlipperTrayIcon.Tests;
 public class PrintQueueTests
 {
     private static readonly byte[] Png = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+    private static readonly byte[] BigPng = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9];
 
     /// <summary>A fake Moonraker that records what it's asked ("METHOD path body").</summary>
     private sealed class FakeMoonraker : HttpMessageHandler
@@ -46,6 +47,8 @@ public class PrintQueueTests
             };
             if (path == "/server/files/gcodes/parts/.thumbs/Clip-48x48.png")
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) };
+            if (path == "/server/files/gcodes/parts/.thumbs/Clip-300x300.png")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(BigPng) };
             return json == null
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
@@ -82,6 +85,7 @@ public class PrintQueueTests
         var details = await backend.GetFileDetailsAsync("parts/Clip.gcode", default);
         Assert.Equal(2280, details.EstimatedSeconds);
         Assert.Equal(Png, details.Thumbnail); // the 48 px one, from next to the file
+        Assert.Equal(BigPng, details.Preview); // the 300 px one, for hovering
         await backend.GetFileDetailsAsync("parts/Clip.gcode", default);
         Assert.Single(printer.Requests, r => r.Contains("/server/files/metadata")); // cached
     }
@@ -123,6 +127,16 @@ public class PrintQueueTests
     {
         using var doc = JsonDocument.Parse(meta);
         Assert.Equal(expected, MoonrakerBackend.PickThumbnail(doc.RootElement));
+    }
+
+    [Theory]
+    [InlineData("""{"thumbnails":[{"width":32,"relative_path":"a"},{"width":300,"relative_path":"b"},{"width":48,"relative_path":"c"}]}""", "b")]
+    [InlineData("""{"thumbnails":[{"width":48,"relative_path":"a"}]}""", "a")]
+    [InlineData("""{}""", null)]
+    public void PreviewIsTheBiggestThumbnail(string meta, string? expected)
+    {
+        using var doc = JsonDocument.Parse(meta);
+        Assert.Equal(expected, MoonrakerBackend.PickPreview(doc.RootElement));
     }
 
     [Theory]

@@ -1,7 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [2.6.0] - 2026-10-31
 ### Changed
+- The **stream dropdowns** in Settings list every protocol the app supports (RTSP, H.264, MJPEG,
+  Snapshots); the ones a camera doesn't offer are greyed out and can't be picked. H.264's
+  description now says why RTSP is the better choice when both are offered.
 - The **console shows the same messages as Mainsail**. It reads Mainsail's console settings from
   the printer (*Hide temperatures*, *Hide timelapse*, custom filters, and *clear console*) and
   applies them exactly as Mainsail v2.19 does. Changes made in Mainsail apply the next time the

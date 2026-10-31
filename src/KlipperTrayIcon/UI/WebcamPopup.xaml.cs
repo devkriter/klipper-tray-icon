@@ -69,7 +69,7 @@ public partial class WebcamPopup : Window
     // Reused for every raw frame of the same size (Bambu), instead of a new bitmap per frame.
     private WriteableBitmap? _video;
 
-    public WebcamPopup(IPrinterBackend backend, bool showConsole, bool hideTimelapse = true)
+    public WebcamPopup(IPrinterBackend backend, bool showConsole)
     {
         InitializeComponent();
         _backend = backend;
@@ -83,7 +83,7 @@ public partial class WebcamPopup : Window
             ConsolePanel.Visibility = Visibility.Visible;
             Layout.SizeChanged += (_, _) => UpdateArrangement();
             UpdateArrangement();
-            _console = new ConsoleFeed(backend, hideTimelapse, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+            _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
             ShowStatus(PrinterStatus.Connecting);
         }
         if (backend.SecondViewName != null)
@@ -748,7 +748,8 @@ public sealed class ConsoleLine
     // you actually want to read, so they get the brightest colour. Commands
     // (often routine macros) are a softer blue so they don't compete.
     private static readonly Brush Response = Frozen("#ECECEC"), Command = Frozen("#82AEE0"),
-                                  Error = Frozen("#FF7B72"), Temperature = Frozen("#E3B341"), Status = Frozen("#A0A0A0");
+                                  Error = Frozen("#FF7B72"), Temperature = Frozen("#E3B341"), Status = Frozen("#A0A0A0"),
+                                  Dimmed = Frozen("#8C8C8C"); // Mainsail greys out "// action:" and "// debug:" lines
     private static readonly FontFamily Mono = new("Cascadia Mono, Consolas"), Ui = new("Segoe UI");
 
     internal static Brush ResponseBrush => Response;
@@ -780,21 +781,15 @@ public sealed class ConsoleLine
             return new ConsoleLine { Time = time, Text = StripPrefix(raw, "!!"), Brush = Error, FontWeight = FontWeights.SemiBold };
         if (StatusText.TemperatureReport().IsMatch(raw))
             return new ConsoleLine { Time = time, Text = raw, Brush = Temperature, IsTemperature = true };
-        return new ConsoleLine { Time = time, Text = StripPrefix(raw, "//") };
+        // As Mainsail shows them: without "// ", "echo:" or "debug:" in front.
+        string text = StripPrefix(raw, "//");
+        if (text.StartsWith("echo:"))
+            text = text["echo:".Length..].TrimStart();
+        else if (text.StartsWith("debug:"))
+            text = text["debug:".Length..].TrimStart();
+        bool dimmed = raw.StartsWith("// action:") || raw.StartsWith("// debug:");
+        return new ConsoleLine { Time = time, Text = text, Brush = dimmed ? Dimmed : Response };
     }
-
-    // Macros from moonraker-timelapse (TIMELAPSE_TAKE_FRAME, _TIMELAPSE_NEW_FRAME,
-    // SET_GCODE_VARIABLE MACRO=TIMELAPSE_..., HYPERLAPSE ...).
-    private static readonly System.Text.RegularExpressions.Regex TimelapseMacro =
-        new(@"\b_?(TIMELAPSE|HYPERLAPSE)\w*", System.Text.RegularExpressions.RegexOptions.IgnoreCase |
-                                               System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    /// <summary>
-    /// A command sent by the timelapse macros on every frame. Only commands
-    /// are matched: Klipper's responses (including timelapse errors) always show.
-    /// </summary>
-    internal static bool IsTimelapseCommand(ConsoleEntry entry) =>
-        entry.Type == "command" && TimelapseMacro.IsMatch(entry.Message);
 
     /// <summary>
     /// Klipper marks every line of a response with "// " (or "!! " for
@@ -814,34 +809,26 @@ public sealed class ConsoleLine
         return string.Join("\n", lines);
     }
 
-    /// <summary>
-    /// Adds a line to the console. Klipper prints a temperature report every
-    /// second while it waits to heat (M109/M190); consecutive ones replace
-    /// each other so there's one line that updates in place.
-    /// </summary>
-    internal static void AppendTo(IList<ConsoleLine> lines, ConsoleLine line)
-    {
-        if (line.IsTemperature && lines.Count > 0 && lines[^1].IsTemperature)
-            lines[^1] = line;
-        else
-            lines.Add(line);
-    }
-
     public static ConsoleLine StatusMessage(string text) =>
         new() { Text = text, Brush = Status, FontStyle = FontStyles.Italic, FontFamily = Ui };
 }
 
 /// <summary>
 /// Polls Moonraker's console while the popup is visible (plus once up front,
-/// so history is ready before the first click).
+/// so history is ready before the first click), hiding what Mainsail hides.
 /// </summary>
 internal sealed class ConsoleFeed
 {
-    private const int MaxLines = 500;
+    private const int MaxLines = 500; // Mainsail's maxEventHistory
+    // History when the console (re)loads, before filtering; then just the newest lines.
+    private const int HistoryCount = 1000, PollCount = 100;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    // Mainsail's filter settings are checked again this often while the popup is open.
+    private static readonly TimeSpan FilterRefresh = TimeSpan.FromSeconds(30);
 
     private readonly IPrinterBackend _backend;
-    private readonly bool _hideTimelapse;
+    private ConsoleFilter? _filter;
+    private volatile bool _filterDue = true;
     private readonly ObservableCollection<ConsoleLine> _lines = new();
     private readonly System.Windows.Controls.ScrollViewer _scroll;
     private readonly System.Windows.Threading.Dispatcher _ui;
@@ -849,11 +836,10 @@ internal sealed class ConsoleFeed
     private volatile bool _wake = true;
     private bool _hasLines;
 
-    public ConsoleFeed(IPrinterBackend backend, bool hideTimelapse, System.Windows.Controls.ItemsControl list,
+    public ConsoleFeed(IPrinterBackend backend, System.Windows.Controls.ItemsControl list,
                        System.Windows.Controls.ScrollViewer scroll, System.Windows.Threading.Dispatcher ui, CancellationToken ct)
     {
         _backend = backend;
-        _hideTimelapse = hideTimelapse;
         _scroll = scroll;
         _ui = ui;
         list.ItemsSource = _lines;
@@ -861,14 +847,17 @@ internal sealed class ConsoleFeed
         _ = Task.Run(() => LoopAsync(ct));
     }
 
-    public void Resume() { _active = true; _wake = true; }
+    // Opening the popup also re-reads Mainsail's filters, in case they were changed there.
+    public void Resume() { _active = true; _wake = true; _filterDue = true; }
     public void Pause() => _active = false;
 
     private async Task LoopAsync(CancellationToken ct)
     {
         double lastTime = 0;
         string? lastError = null;
+        bool reload = true; // fetch the whole history and start the list over
         var sinceLastPoll = System.Diagnostics.Stopwatch.StartNew();
+        var sinceFilter = System.Diagnostics.Stopwatch.StartNew();
         while (!ct.IsCancellationRequested)
         {
             bool due = _wake || (_active && sinceLastPoll.Elapsed >= PollInterval);
@@ -881,18 +870,27 @@ internal sealed class ConsoleFeed
             sinceLastPoll.Restart();
             try
             {
-                var entries = await _backend.GetConsoleMessagesAsync(ct).ConfigureAwait(false);
+                if (_filterDue || sinceFilter.Elapsed >= FilterRefresh)
+                {
+                    var filter = await _backend.GetConsoleFilterAsync(ct).ConfigureAwait(false);
+                    if (_filter != null && !_filter.SameAs(filter))
+                        (reload, lastTime) = (true, 0); // changed in Mainsail: show the history as it now would
+                    (_filter, _filterDue) = (filter, false);
+                    sinceFilter.Restart();
+                }
+                var entries = await _backend.GetConsoleMessagesAsync(reload ? HistoryCount : PollCount, ct).ConfigureAwait(false);
                 var fresh = new List<ConsoleEntry>();
                 foreach (var e in entries)
                     if (e.Time > lastTime)
                         fresh.Add(e);
                 if (fresh.Count > 0)
                     lastTime = fresh[^1].Time;
-                if (_hideTimelapse)
-                    fresh.RemoveAll(ConsoleLine.IsTimelapseCommand);
+                fresh.RemoveAll(e => !_filter!.Shows(e));
                 lastError = null;
-                if (fresh.Count > 0 || !_hasLines)
-                    await _ui.InvokeAsync(() => ShowEntries(fresh));
+                bool startOver = reload;
+                reload = false;
+                if (fresh.Count > 0 || !_hasLines || startOver)
+                    await _ui.InvokeAsync(() => ShowEntries(fresh, startOver));
             }
             catch (OperationCanceledException) { break; }
             catch (Exception e)
@@ -909,11 +907,11 @@ internal sealed class ConsoleFeed
 
     private bool AtBottom => _scroll.VerticalOffset >= _scroll.ScrollableHeight - 2;
 
-    private void ShowEntries(List<ConsoleEntry> entries)
+    private void ShowEntries(List<ConsoleEntry> entries, bool startOver)
     {
-        if (!_hasLines)
+        if (!_hasLines || startOver)
         {
-            // First successful fetch: replace the "Loading..." placeholder.
+            // First successful fetch (replacing "Loading..."), or Mainsail's filters changed.
             _hasLines = true;
             _lines.Clear();
             if (entries.Count == 0)
@@ -924,7 +922,7 @@ internal sealed class ConsoleFeed
         }
         bool follow = AtBottom;
         foreach (var entry in entries)
-            ConsoleLine.AppendTo(_lines, ConsoleLine.FromEntry(entry));
+            _lines.Add(ConsoleLine.FromEntry(entry));
         while (_lines.Count > MaxLines)
             _lines.RemoveAt(0);
         if (follow)

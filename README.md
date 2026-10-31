@@ -158,7 +158,6 @@ For Klipper/Moonraker (see `config.example.json`):
     "moonraker_url": "http://your-printer-ip",
     "moonraker_api_key": "",
     "webcam_console": true,
-    "console_hide_timelapse": true,
     "webcam_name": "",
     "webcam_stream": "",
     "second_view_name": "",
@@ -188,8 +187,9 @@ need far less bandwidth than MJPEG), `mjpeg` or `snapshots`. Empty uses the best
 offers, and switches to MJPEG if RTSP or H.264 keeps dropping. Webcams that use WebRTC or an iframe work too if the printer also serves MJPEG
 or a snapshot for them. For the Snapmaker U1, see [Snapmaker U1 Support](#snapmaker-u1-support).
 
-`console_hide_timelapse` hides the commands moonraker-timelapse sends on every frame from the
-console (Klipper's responses always show).
+The console hides the same messages as Mainsail's console: it reads Mainsail's console settings
+from the printer (*Hide temperatures*, *Hide timelapse* and your custom filters) and applies them
+the way Mainsail does. Change them in Mainsail and the popup follows the next time it opens.
 
 `moonraker_api_key` is optional. Moonraker lets devices on your home network in without one
 (via `trusted_clients` in `moonraker.conf`), so you only need it if this PC reaches the printer

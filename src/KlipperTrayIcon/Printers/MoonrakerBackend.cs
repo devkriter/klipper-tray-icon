@@ -263,15 +263,32 @@ public sealed class MoonrakerBackend : IPrinterBackend
 
     // ---- console -------------------------------------------------------------
 
-    public async Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(int count, CancellationToken ct)
     {
-        using var doc = await GetJsonAsync("/server/gcode_store?count=100", TimeSpan.FromSeconds(3), ct);
+        using var doc = await GetJsonAsync($"/server/gcode_store?count={count}", TimeSpan.FromSeconds(3), ct);
         var store = doc.RootElement.Prop("result").Prop("gcode_store");
         if (store.ValueKind != JsonValueKind.Array)
             return [];
         return store.EnumerateArray()
             .Select(e => new ConsoleEntry(e.Str("message"), e.Num("time"), e.Str("type", "response")))
             .ToList();
+    }
+
+    /// <summary>
+    /// Mainsail's console settings (what it hides), so the popup matches it.
+    /// None saved (or no Mainsail): Mainsail's defaults.
+    /// </summary>
+    public async Task<ConsoleFilter> GetConsoleFilterAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var doc = await GetJsonAsync("/server/database/item?namespace=mainsail&key=console", TimeSpan.FromSeconds(3), ct);
+            return ConsoleFilter.FromMainsail(doc.RootElement.Prop("result").Prop("value"));
+        }
+        catch (MoonrakerHttpException e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            return ConsoleFilter.MainsailDefaults;
+        }
     }
 
     // ---- webcam --------------------------------------------------------------

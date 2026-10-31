@@ -21,8 +21,6 @@ public sealed class AppConfig
     [JsonPropertyName("update_interval_seconds")] public double UpdateIntervalSeconds { get; set; } = 2;
     [JsonPropertyName("notifications")] public bool Notifications { get; set; } = true;
     [JsonPropertyName("webcam_console")] public bool WebcamConsole { get; set; } = true;
-    /// <summary>Hide the commands timelapse macros send on every frame.</summary>
-    [JsonPropertyName("console_hide_timelapse")] public bool ConsoleHideTimelapse { get; set; } = true;
     /// <summary>Moonraker webcam to show; empty picks the first one.</summary>
     [JsonPropertyName("webcam_name")] public string WebcamName { get; set; } = "";
     /// <summary>Webcam the popup can switch to (e.g. a remote touchscreen); empty for none.</summary>

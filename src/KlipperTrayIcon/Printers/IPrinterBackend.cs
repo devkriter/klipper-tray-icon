@@ -40,8 +40,10 @@ public interface IPrinterBackend : IDisposable
     /// <summary>Taps or drags on a touchable view, in its pixel coordinates. Errors are ignored.</summary>
     Task SendTouchAsync(CameraView view, TouchAction action, int x, int y, CancellationToken ct);
 
-    /// <summary>Recent console lines, oldest first. Throws if the printer can't be reached.</summary>
-    Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(CancellationToken ct);
+    /// <summary>Up to <paramref name="count"/> recent console lines, oldest first. Throws if the printer can't be reached.</summary>
+    Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(int count, CancellationToken ct);
+    /// <summary>Which console lines to hide (Mainsail's settings). Throws if the printer can't be reached.</summary>
+    Task<ConsoleFilter> GetConsoleFilterAsync(CancellationToken ct) => Task.FromResult(ConsoleFilter.None);
     /// <summary>Human-readable reason for an exception thrown by this backend.</summary>
     string DescribeError(Exception e);
 }

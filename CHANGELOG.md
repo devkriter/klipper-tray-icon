@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+### Changed
+- The **console shows the same messages as Mainsail**. It reads Mainsail's console settings from
+  the printer (*Hide temperatures*, *Hide timelapse*, custom filters, and *clear console*) and
+  applies them exactly as Mainsail v2.19 does. Changes made in Mainsail apply the next time the
+  popup opens. Lines are also shown as Mainsail shows them (no `echo:` prefix; `action:` and
+  `debug:` lines dimmed), and the history goes back as far as Mainsail's (500 lines).
+
+### Removed
+- The *Hide the commands timelapse sends on every frame* option: Mainsail's *Hide timelapse*
+  setting now decides that. Consecutive temperature reports are no longer merged into one line
+  (Mainsail hides them by default).
+
 ## [2.5.0] - 2026-10-31
 ### Added
 - **U1 Extended** printer type, for the Snapmaker U1 with paxx12's extended firmware (it's

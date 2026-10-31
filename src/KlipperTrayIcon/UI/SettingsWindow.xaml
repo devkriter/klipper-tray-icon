@@ -145,12 +145,9 @@
             <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Test connection lists the printer's cameras and the streams each one offers." />
 
-            <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,4"
-                      Content="Show the Klipper console next to the webcam" />
-            <!-- Indented under the console option; only meaningful while it's on. -->
-            <CheckBox x:Name="HideTimelapseCheck" Grid.Row="8" Grid.ColumnSpan="3" Margin="30,0,0,8"
-                      Content="Hide the commands timelapse sends on every frame"
-                      IsEnabled="{Binding IsChecked, ElementName=ConsoleCheck}" />
+            <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,8"
+                      Content="Show the Klipper console next to the webcam"
+                      ToolTip="It hides the same messages as Mainsail's console, using Mainsail's console filters." />
         </Grid>
 
         <!-- Bambu -->

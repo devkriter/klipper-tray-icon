@@ -43,7 +43,6 @@ public partial class SettingsWindow : Window
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
-        HideTimelapseCheck.IsChecked = config.ConsoleHideTimelapse;
         FillSources(null, config.WebcamName, config.SecondViewName);
         FillStreams(CameraView.Main, null, config.WebcamStream);
         FillStreams(CameraView.Second, null, config.SecondViewStream);
@@ -149,7 +148,6 @@ public partial class SettingsWindow : Window
             config.MoonrakerUrl = url;
             config.MoonrakerApiKey = Secret(ApiKeyHidden, ApiKeyVisible);
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
-            config.ConsoleHideTimelapse = HideTimelapseCheck.IsChecked == true;
             config.WebcamName = Selected(CameraCombo);
             config.SecondViewName = Selected(SecondViewCombo);
             config.WebcamStream = Selected(CameraStreamCombo);

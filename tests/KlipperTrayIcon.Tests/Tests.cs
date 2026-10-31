@@ -203,6 +203,19 @@ public class MoonrakerTests
     }
 
     [Fact]
+    public async Task ReadsMainsailConsoleSettings()
+    {
+        var http = Stub(path => path.StartsWith("/server/database/item?namespace=mainsail&key=console")
+            ? """{"result":{"namespace":"mainsail","key":"console","value":{"hideTlCommands":false}}}"""
+            : null);
+        var filter = await new MoonrakerBackend("p", http: http).GetConsoleFilterAsync(default);
+        Assert.Equal([ConsoleFilter.WaitTemperatures], filter.Rules);
+        // No Mainsail settings on the printer (404): Mainsail's defaults.
+        var none = await new MoonrakerBackend("p", http: Stub(_ => null)).GetConsoleFilterAsync(default);
+        Assert.True(none.SameAs(ConsoleFilter.MainsailDefaults));
+    }
+
+    [Fact]
     public async Task ExplainsAuthFailures()
     {
         var http = Stub(_ => null, HttpStatusCode.Unauthorized);
@@ -315,7 +328,7 @@ public class ConsoleLineTests
     [InlineData("G28", "command", "> G28", false)]
     [InlineData("!! Move out of range", "response", "Move out of range", false)]
     [InlineData("// Unknown command:\"T0\"", "response", "Unknown command:\"T0\"", false)]
-    [InlineData("echo: Nozzle expansion offset applied", "response", "echo: Nozzle expansion offset applied", false)]
+    [InlineData("echo: Nozzle expansion offset applied", "response", "Nozzle expansion offset applied", false)] // as Mainsail shows it
     [InlineData("B:60.0 /60.0 T0:200.0 /210.0", "response", "B:60.0 /60.0 T0:200.0 /210.0", true)]
     public void Classifies(string message, string type, string text, bool isTemperature)
     {
@@ -323,27 +336,6 @@ public class ConsoleLineTests
         Assert.Equal(text, line.Text);
         Assert.Equal(isTemperature, line.IsTemperature);
         Assert.True(line.HasTime);
-    }
-
-    [Theory]
-    [InlineData("SET_GCODE_VARIABLE MACRO=TIMELAPSE_TAKE_FRAME VARIABLE=takingframe VALUE=False", "command", true)]
-    [InlineData("TIMELAPSE_TAKE_FRAME", "command", true)]
-    [InlineData("_TIMELAPSE_NEW_FRAME HYPERLAPSE=FALSE", "command", true)]
-    [InlineData("HYPERLAPSE ACTION=START CYCLE=30", "command", true)]
-    [InlineData("timelapse_take_frame", "command", true)]
-    [InlineData("SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=x VALUE=1", "command", false)]
-    [InlineData("G28", "command", false)]
-    [InlineData("// TIMELAPSE: frame capture failed", "response", false)] // responses always show
-    [InlineData("!! Unknown command: TIMELAPSE_TAKE_FRAME", "response", false)]
-    public void RecognisesTimelapseCommands(string message, string type, bool expected) =>
-        Assert.Equal(expected, ConsoleLine.IsTimelapseCommand(new ConsoleEntry(message, 1, type)));
-
-    [Fact]
-    public void ConfigDefaultsToHidingTimelapse()
-    {
-        Assert.True(new AppConfig().ConsoleHideTimelapse);
-        var off = JsonSerializer.Deserialize<AppConfig>("""{"console_hide_timelapse": false}""", ConfigStore.JsonOptions)!;
-        Assert.False(off.ConsoleHideTimelapse);
     }
 
     [Fact]
@@ -355,19 +347,71 @@ public class ConsoleLineTests
     }
 
     [Fact]
-    public void ConsecutiveTemperatureReportsCollapseToOneLine()
+    public void ActionAndDebugLinesAreDimmedLikeMainsail()
     {
-        var lines = new List<ConsoleLine>();
-        ConsoleLine Entry(string m, string type = "response") => ConsoleLine.FromEntry(new ConsoleEntry(m, 1, type));
+        var normal = ConsoleLine.FromEntry(new ConsoleEntry("// Klipper state: Ready", 1, "response"));
+        var action = ConsoleLine.FromEntry(new ConsoleEntry("// action:cancel", 1, "response"));
+        Assert.NotEqual(normal.Brush, action.Brush);
+        Assert.Equal("action:cancel", action.Text);
+    }
+}
 
-        ConsoleLine.AppendTo(lines, Entry("M190 S110", "command"));
-        for (int i = 0; i < 30; i++)
-            ConsoleLine.AppendTo(lines, Entry($"B:{100 + i * 0.3:0.0} /110.0 T0:{200 + i}.0 /250.0"));
-        ConsoleLine.AppendTo(lines, Entry("// heating done"));
-        ConsoleLine.AppendTo(lines, Entry("B:110.0 /110.0 T0:250.0 /250.0"));
+/// <summary>The console hides exactly what Mainsail (v2.19) hides.</summary>
+public class ConsoleFilterTests
+{
+    private static ConsoleEntry Response(string message, double time = 1_700_000_000) => new(message, time, "response");
+    private static ConsoleEntry Command(string message) => new(message, 1_700_000_000, "command");
 
-        Assert.Equal(["> M190 S110", "B:108.7 /110.0 T0:229.0 /250.0", "heating done", "B:110.0 /110.0 T0:250.0 /250.0"],
-                     lines.Select(l => l.Text));
+    [Theory]
+    [InlineData("B:60.0 /60.0 T0:200.0 /210.0", false)]       // temperature report
+    [InlineData("ok B:60.0 /60.0 T0:200.0 /210.0", false)]
+    [InlineData("T:210.0 /210.0", false)]
+    [InlineData("C:35.0 /0.0", false)]
+    [InlineData("// Bed Mesh state has been saved", true)]
+    [InlineData("Bed heater on", true)]                       // "B" but no colon right after
+    public void DefaultsHideTemperatureReports(string message, bool shown) =>
+        Assert.Equal(shown, ConsoleFilter.MainsailDefaults.Shows(Response(message)));
+
+    [Theory]
+    [InlineData("SET_GCODE_VARIABLE MACRO=TIMELAPSE_TAKE_FRAME VARIABLE=takingframe VALUE=False", false)]
+    [InlineData("TIMELAPSE_TAKE_FRAME", false)]
+    [InlineData("_TIMELAPSE_NEW_FRAME HYPERLAPSE=FALSE", false)]
+    [InlineData("TIMELAPSE_RENDER", false)]
+    [InlineData("_SET_TIMELAPSE_SETUP ENABLE=1", false)]
+    [InlineData("HYPERLAPSE ACTION=START CYCLE=30", false)]
+    [InlineData("timelapse_take_frame", true)]               // Mainsail's rules are case-sensitive
+    [InlineData("SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=x VALUE=1", true)]
+    [InlineData("G28", true)]
+    public void DefaultsHideTimelapseCommands(string message, bool shown) =>
+        Assert.Equal(shown, ConsoleFilter.MainsailDefaults.Shows(Command(message)));
+
+    [Fact]
+    public void FollowsMainsailSettings()
+    {
+        // Temperatures shown, timelapse still hidden, one custom filter on (two rules,
+        // one of them broken, so skipped) and one off, and the console cleared at some point.
+        using var settings = JsonDocument.Parse("""
+            {"height":640,"hideWaitTemperatures":false,"cleared_since":1700000000000,
+             "consolefilters":{
+               "a":{"name":"Probe","bool":true,"regex":"^probe at\n([unclosed\n"},
+               "b":{"name":"Off","bool":false,"regex":"^G28"}}}
+            """);
+        var filter = ConsoleFilter.FromMainsail(settings.RootElement);
+        Assert.Equal(["^_TIMELAPSE_NEW_FRAME", "^TIMELAPSE_TAKE_FRAME", "^TIMELAPSE_RENDER", "^_SET_TIMELAPSE_SETUP",
+                      "^HYPERLAPSE ACTION=", "^SET_GCODE_VARIABLE MACRO=TIMELAPSE_", "^probe at", "([unclosed"],
+                     filter.Rules);
+        Assert.True(filter.Shows(Response("B:60.0 /60.0 T0:200.0 /210.0", 1_700_000_001)));
+        Assert.False(filter.Shows(Response("probe at 10.0,20.0 is z=1.2", 1_700_000_001)));
+        Assert.True(filter.Shows(Response("G28", 1_700_000_001)));               // filter that's off
+        Assert.False(filter.Shows(Response("from before the clear", 1_699_999_999)));
+    }
+
+    [Fact]
+    public void NothingSavedMeansMainsailDefaults()
+    {
+        using var settings = JsonDocument.Parse("""{"height":640}""");
+        Assert.True(ConsoleFilter.FromMainsail(settings.RootElement).SameAs(ConsoleFilter.MainsailDefaults));
+        Assert.False(ConsoleFilter.MainsailDefaults.SameAs(ConsoleFilter.None));
     }
 }
 

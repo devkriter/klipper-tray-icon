@@ -250,7 +250,7 @@ public sealed class BambuBackend : IPrinterBackend
 
     public string DescribeError(Exception e) => $"Can't reach printer at {_ip}";
 
-    public Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(CancellationToken ct) =>
+    public Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(int count, CancellationToken ct) =>
         throw new NotSupportedException("Bambu printers have no console");
 
     // ---- camera ----------------------------------------------------------------------

@@ -10,8 +10,11 @@ public abstract class CameraFrame : IDisposable
     public virtual void Dispose() { }
 }
 
-/// <summary>A JPEG, as MJPEG webcams (Klipper) send them.</summary>
-public sealed class JpegFrame(byte[] data) : CameraFrame
+/// <summary>
+/// A JPEG, as MJPEG webcams (Klipper) send them, or a PNG from a view that's
+/// polled as snapshots (a remote touchscreen).
+/// </summary>
+public sealed class ImageFrame(byte[] data) : CameraFrame
 {
     public byte[] Data { get; } = data;
 }

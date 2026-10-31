@@ -64,6 +64,7 @@ public sealed class BambuBackend : IPrinterBackend
     public bool SupportsWebcam => true;
     public bool SupportsConsole => false;
     public string? DashboardUrl => null;
+    public string? SecondViewName => null;
 
     // ---- report parsing (community-documented schema; no official docs) ----
 
@@ -259,10 +260,13 @@ public sealed class BambuBackend : IPrinterBackend
     public static Uri BuildRtspsUrl(string ip, string accessCode, int port = 322) =>
         new($"rtsps://bblp:{Uri.EscapeDataString(accessCode)}@{ip}:{port}/streaming/live/1");
 
-    public Task<byte[]?> GetWebcamSnapshotAsync(TimeSpan timeout, CancellationToken ct) =>
+    public Task<byte[]?> GetWebcamSnapshotAsync(CameraView view, TimeSpan timeout, CancellationToken ct) =>
         Task.FromResult<byte[]?>(null); // would mean holding the printer's only camera slot; the popup keeps the last frame instead
 
-    public async IAsyncEnumerable<CameraFrame> GetWebcamFramesAsync([EnumeratorCancellation] CancellationToken ct)
+    public bool IsTouchable(CameraView view) => false;
+    public Task SendTouchAsync(CameraView view, TouchAction action, int x, int y, CancellationToken ct) => Task.CompletedTask;
+
+    public async IAsyncEnumerable<CameraFrame> GetWebcamFramesAsync(CameraView view, [EnumeratorCancellation] CancellationToken ct)
     {
         // Disposing the client (when the popup hides) hangs up at once: the
         // printer allows only one camera viewer.

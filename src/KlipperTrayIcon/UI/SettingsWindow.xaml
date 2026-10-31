@@ -53,6 +53,9 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Text="Address" Style="{StaticResource FieldLabel}" />
@@ -93,10 +96,21 @@
                       Checked="OnShowApiKeyChanged" Unchecked="OnShowApiKeyChanged" />
             <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Optional — leave blank unless Moonraker asks for one." />
-            <CheckBox x:Name="ConsoleCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,4"
+
+            <!-- Filled from the printer's webcam list once it's been reached. -->
+            <TextBlock Grid.Row="4" Text="Camera" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="CameraCombo" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" />
+            <TextBlock Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" />
+            <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="Test connection lists the printer's cameras. The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen, which you can click on." />
+
+            <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,4"
                       Content="Show the Klipper console next to the webcam" />
             <!-- Indented under the console option; only meaningful while it's on. -->
-            <CheckBox x:Name="HideTimelapseCheck" Grid.Row="5" Grid.ColumnSpan="3" Margin="30,0,0,8"
+            <CheckBox x:Name="HideTimelapseCheck" Grid.Row="8" Grid.ColumnSpan="3" Margin="30,0,0,8"
                       Content="Hide the commands timelapse sends on every frame"
                       IsEnabled="{Binding IsChecked, ElementName=ConsoleCheck}" />
         </Grid>

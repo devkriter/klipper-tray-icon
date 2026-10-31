@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -10,6 +11,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using KlipperTrayIcon.Printers;
+using TouchAction = KlipperTrayIcon.Printers.TouchAction;
 
 namespace KlipperTrayIcon.UI;
 
@@ -25,6 +27,8 @@ public partial class WebcamPopup : Window
     private static readonly TimeSpan SnapshotRefresh = TimeSpan.FromSeconds(20);
     // No frame for this long while open: the stream has stalled, so reconnect.
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(10);
+    // A stream that ends after running at least this long is reconnected at once.
+    private static readonly TimeSpan QuietReconnectAfter = TimeSpan.FromSeconds(3);
     // A tray click while the popup is open first takes focus away (hiding
     // it), then arrives as a click. Treat that pair as "toggle closed".
     private static readonly TimeSpan ToggleWindow = TimeSpan.FromMilliseconds(400);
@@ -37,8 +41,16 @@ public partial class WebcamPopup : Window
     private CancellationTokenSource? _session;
     private int _sessionId;
     private bool _gotLive;
-    private BitmapSource? _cached;
-    private DateTime _cachedAt;
+    // The camera, or the second view (e.g. the printer's touchscreen) the
+    // switch button flips to. Each keeps its own cached picture.
+    private CameraView _view = CameraView.Main;
+    private readonly BitmapSource?[] _cached = new BitmapSource?[2];
+    private readonly DateTime[] _cachedAt = new DateTime[2];
+    // The view on screen takes clicks, which go to the printer as taps.
+    private bool _touchable;
+    private bool _touching;
+    private readonly Channel<(CameraView View, TouchAction Action, int X, int Y)> _touches =
+        Channel.CreateUnbounded<(CameraView, TouchAction, int, int)>(new UnboundedChannelOptions { SingleReader = true });
     private DateTime _hiddenAt;
     private DateTime _deactivatedAt;
     // Pinned: stays open, can sit behind other windows and remembers where
@@ -70,6 +82,17 @@ public partial class WebcamPopup : Window
             _console = new ConsoleFeed(backend, hideTimelapse, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
             ShowStatus(PrinterStatus.Connecting);
         }
+        if (backend.SecondViewName != null)
+        {
+            ViewButton.Visibility = Visibility.Visible;
+            UpdateViewButton();
+        }
+        // Either view can be a touchscreen (it can be picked as the camera too).
+        VideoImage.MouseLeftButtonDown += OnTouchDown;
+        VideoImage.MouseMove += OnTouchMove;
+        VideoImage.MouseLeftButtonUp += (_, _) => EndTouch();
+        VideoImage.LostMouseCapture += (_, _) => EndTouch();
+        _ = Task.Run(() => TouchLoopAsync(_lifetime.Token));
 
         Deactivated += (_, _) =>
         {
@@ -133,18 +156,7 @@ public partial class WebcamPopup : Window
 
         // Paint the cached frame before the window appears, so the very first
         // thing on screen is a picture rather than "Connecting...".
-        if (_cached != null)
-        {
-            SetImage(_cached);
-            SetBadge($"Snapshot from {_cachedAt:HH:mm:ss} · connecting…");
-        }
-        else
-        {
-            VideoImage.Source = null;
-            Placeholder.Text = "Connecting...";
-            Placeholder.Visibility = Visibility.Visible;
-            SetBadge(null);
-        }
+        ShowCached();
 
         Show();
         Activate();
@@ -193,11 +205,48 @@ public partial class WebcamPopup : Window
 
     private static readonly Brush PinnedBrush = Frozen(Color.FromRgb(0x60, 0xCD, 0xFF));
 
+    /// <summary>Flips between the camera and the second view.</summary>
+    private void OnViewClick(object sender, RoutedEventArgs e)
+    {
+        EndTouch();
+        _view = _view == CameraView.Main ? CameraView.Second : CameraView.Main;
+        UpdateViewButton();
+        ShowCached();
+        StartSession();
+    }
+
+    private void UpdateViewButton()
+    {
+        bool onSecond = _view == CameraView.Second;
+        ViewButton.Content = onSecond ? "" : ""; // video camera / monitor: where the button goes
+        ViewButton.ToolTip = onSecond ? "Show the camera" : $"Show {_backend.SecondViewName}";
+    }
+
+    /// <summary>The current view's cached picture while it connects, else "Connecting...".</summary>
+    private void ShowCached()
+    {
+        SetTouchable(false); // until the view says otherwise
+        if (_cached[(int)_view] is { } cached)
+        {
+            SetImage(cached);
+            SetBadge($"Snapshot from {_cachedAt[(int)_view]:HH:mm:ss} · connecting…");
+        }
+        else
+        {
+            VideoImage.Source = null;
+            Placeholder.Text = "Connecting...";
+            Placeholder.Visibility = Visibility.Visible;
+            SetBadge(null);
+        }
+    }
+
     /// <summary>Nothing in the popup takes clicks except its buttons, so it drags from anywhere.</summary>
     private void OnDragAnywhere(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState != MouseButtonState.Pressed || IsInButton(e.OriginalSource as DependencyObject))
             return;
+        if (_touchable && e.OriginalSource == VideoImage)
+            return; // a tap on the printer's screen, not a drag
         if (e.ClickCount == 2)
         {
             WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
@@ -232,6 +281,7 @@ public partial class WebcamPopup : Window
     {
         if (!IsVisible)
             return;
+        EndTouch();
         _hiddenAt = DateTime.UtcNow;
         Hide();
         _console?.Pause();
@@ -280,8 +330,8 @@ public partial class WebcamPopup : Window
         VideoRow.Height = stacked ? new GridLength(videoHeight) : new GridLength(1, GridUnitType.Star);
         ConsoleRow.Height = stacked ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ConsolePanel.BorderThickness = stacked ? new Thickness(0, 1, 0, 0) : new Thickness(1, 0, 0, 0);
-        // Beside the video, the strip leaves room for the pin and close buttons above it.
-        StatsList.Margin = new Thickness(6, 8, stacked ? 6 : 62, 9);
+        // Beside the video, the strip leaves room for the buttons above it.
+        StatsList.Margin = new Thickness(6, 8, stacked ? 6 : 28 * (_backend.SecondViewName != null ? 3 : 2) + 6, 9);
     }
 
     // ---- stats strip ---------------------------------------------------------------
@@ -322,11 +372,12 @@ public partial class WebcamPopup : Window
     {
         EndSession();
         int id = ++_sessionId;
+        var view = _view;
         _gotLive = false;
         var cts = _session = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _ = Task.Run(() => StreamAsync(id, cts.Token));
+        _ = Task.Run(() => StreamAsync(id, view, cts.Token));
         // A single snapshot usually arrives well before the stream's first frame.
-        _ = Task.Run(() => QuickSnapshotAsync(id, cts.Token));
+        _ = Task.Run(() => QuickSnapshotAsync(id, view, cts.Token));
     }
 
     private void EndSession()
@@ -342,17 +393,24 @@ public partial class WebcamPopup : Window
     /// Keeps the live video going while the popup is open: a stream that ends
     /// or goes quiet (Wi-Fi drop, camera service restart) is reconnected.
     /// </summary>
-    private async Task StreamAsync(int id, CancellationToken ct)
+    private async Task StreamAsync(int id, CameraView view, CancellationToken ct)
     {
         bool everLive = false;
         for (int attempt = 0; !ct.IsCancellationRequested; attempt++)
         {
-            bool gotFrame = await StreamOnceAsync(id, ct).ConfigureAwait(false);
+            var connected = System.Diagnostics.Stopwatch.StartNew();
+            var sinceFrame = new System.Diagnostics.Stopwatch();
+            bool gotFrame = await StreamOnceAsync(id, view, sinceFrame, ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested)
                 break;
             everLive |= gotFrame;
             if (gotFrame)
                 attempt = 0;
+            // Some cameras hang up now and then mid-stream (the Snapmaker U1's
+            // drops full-rate MJPEG every few seconds). The picture is still
+            // fresh (it ended, rather than stalled): reconnect straight away, without a badge.
+            if (gotFrame && connected.Elapsed >= QuietReconnectAfter && sinceFrame.Elapsed < TimeSpan.FromSeconds(1))
+                continue;
             Post(id, everLive ? "reconnecting" : "unavailable", null);
             try { await Task.Delay(RetryDelay(attempt), ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
@@ -362,7 +420,7 @@ public partial class WebcamPopup : Window
     internal static TimeSpan RetryDelay(int attempt) => TimeSpan.FromSeconds(Math.Min(10, 1 << Math.Min(attempt, 4)));
 
     /// <summary>One connection to the camera, until it ends or stalls. True if it showed any frames.</summary>
-    private async Task<bool> StreamOnceAsync(int id, CancellationToken ct)
+    private async Task<bool> StreamOnceAsync(int id, CameraView view, System.Diagnostics.Stopwatch sinceFrame, CancellationToken ct)
     {
         using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
         bool gotFrame = false;
@@ -370,20 +428,22 @@ public partial class WebcamPopup : Window
         attempt.CancelAfter(StallTimeout);
         try
         {
-            await foreach (var frame in _backend.GetWebcamFramesAsync(attempt.Token).ConfigureAwait(false))
+            await foreach (var frame in _backend.GetWebcamFramesAsync(view, attempt.Token).ConfigureAwait(false))
             {
                 if (frame is PixelFrame pixels)
                 {
                     gotFrame = true;
+                    sinceFrame.Restart();
                     attempt.CancelAfter(StallTimeout);
                     Post(id, "live", null, pixels);
                     continue;
                 }
-                var image = frame is JpegFrame jpg ? TryDecode(jpg.Data) : null;
+                var image = frame is ImageFrame encoded ? TryDecode(encoded.Data) : null;
                 frame.Dispose();
                 if (image == null)
                     continue;
                 gotFrame = true;
+                sinceFrame.Restart();
                 attempt.CancelAfter(StallTimeout);
                 Post(id, "live", image);
             }
@@ -392,28 +452,30 @@ public partial class WebcamPopup : Window
         return gotFrame;
     }
 
-    private async Task QuickSnapshotAsync(int id, CancellationToken ct)
+    private async Task QuickSnapshotAsync(int id, CameraView view, CancellationToken ct)
     {
-        var jpg = await _backend.GetWebcamSnapshotAsync(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
+        var jpg = await _backend.GetWebcamSnapshotAsync(view, TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
         if (jpg != null && TryDecode(jpg) is { } image)
             Post(id, "snapshot", image);
     }
 
     /// <summary>
-    /// While hidden, keep the cached picture reasonably fresh (Klipper only -
+    /// While hidden, keep the cached pictures reasonably fresh (Klipper only -
     /// a Bambu snapshot would hold the printer's only camera slot, so the
     /// cache just holds the last frame seen).
     /// </summary>
     private async Task SnapshotLoopAsync(CancellationToken ct)
     {
+        CameraView[] views = _backend.SecondViewName != null ? [CameraView.Main, CameraView.Second] : [CameraView.Main];
         while (!ct.IsCancellationRequested)
         {
-            bool visible = await Dispatcher.InvokeAsync(() => IsVisible);
-            if (!visible)
+            foreach (var view in views)
             {
-                var jpg = await _backend.GetWebcamSnapshotAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+                if (await Dispatcher.InvokeAsync(() => IsVisible))
+                    break;
+                var jpg = await _backend.GetWebcamSnapshotAsync(view, TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
                 if (jpg != null && TryDecode(jpg) is { } image)
-                    Post(0, "cache", image);
+                    await Dispatcher.InvokeAsync(() => (_cached[(int)view], _cachedAt[(int)view]) = (image, DateTime.Now));
             }
             try { await Task.Delay(SnapshotRefresh, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
@@ -465,11 +527,6 @@ public partial class WebcamPopup : Window
         if (item is not var (session, kind, image, pixels))
             return;
 
-        if (kind == "cache")
-        {
-            (_cached, _cachedAt) = (image, DateTime.Now);
-            return;
-        }
         if (session != _sessionId || !IsVisible)
         {
             pixels?.Dispose();
@@ -482,12 +539,13 @@ public partial class WebcamPopup : Window
                 _gotLive = true;
                 if (pixels != null)
                     image = ShowPixels(pixels);
-                (_cached, _cachedAt) = (image, DateTime.Now);
+                (_cached[(int)_view], _cachedAt[(int)_view]) = (image, DateTime.Now);
                 SetImage(image!);
                 SetBadge(null);
+                SetTouchable(_backend.IsTouchable(_view));
                 break;
             case "snapshot" when !_gotLive:
-                (_cached, _cachedAt) = (image, DateTime.Now);
+                (_cached[(int)_view], _cachedAt[(int)_view]) = (image, DateTime.Now);
                 SetImage(image!);
                 SetBadge("Snapshot · connecting to live video…");
                 break;
@@ -495,11 +553,11 @@ public partial class WebcamPopup : Window
                 SetBadge("Live video stopped · reconnecting…");
                 break;
             case "unavailable":
-                if (_cached != null)
+                if (_cached[(int)_view] != null)
                     SetBadge("Live video unavailable · showing last snapshot");
                 else
                 {
-                    Placeholder.Text = "Camera unavailable";
+                    Placeholder.Text = _view == CameraView.Main ? "Camera unavailable" : _backend.SecondViewName + " unavailable";
                     Placeholder.Visibility = Visibility.Visible;
                 }
                 break;
@@ -531,6 +589,78 @@ public partial class WebcamPopup : Window
     {
         BadgeText.Text = text ?? "";
         Badge.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    // ---- touch -----------------------------------------------------------------
+
+    private void SetTouchable(bool touchable)
+    {
+        if (touchable == _touchable)
+            return;
+        if (!touchable)
+            EndTouch();
+        _touchable = touchable;
+        VideoImage.Cursor = touchable ? Cursors.Hand : null;
+    }
+
+    private void OnTouchDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!_touchable || TouchPoint(e) is not var (x, y))
+            return;
+        _touching = true;
+        VideoImage.CaptureMouse(); // keeps the drag going even outside the picture
+        _touches.Writer.TryWrite((_view, TouchAction.Down, x, y));
+        e.Handled = true;
+    }
+
+    private void OnTouchMove(object sender, MouseEventArgs e)
+    {
+        if (_touching && TouchPoint(e) is var (x, y))
+            _touches.Writer.TryWrite((_view, TouchAction.Move, x, y));
+    }
+
+    /// <summary>Lifts the finger: button released, focus lost, view switched or hidden.</summary>
+    private void EndTouch()
+    {
+        if (!_touching)
+            return;
+        _touching = false; // first: releasing capture comes back here
+        var (x, y) = TouchPoint(null) ?? (0, 0);
+        _touches.Writer.TryWrite((_view, TouchAction.Up, x, y));
+        VideoImage.ReleaseMouseCapture();
+    }
+
+    /// <summary>
+    /// Where the mouse is, in the picture's pixels, kept inside it. The image
+    /// is laid out at the picture's shape (Stretch=Uniform), so it's a straight scale.
+    /// </summary>
+    private (int X, int Y)? TouchPoint(MouseEventArgs? e)
+    {
+        if (VideoImage.Source is not BitmapSource { PixelWidth: > 0 } src || VideoImage.ActualWidth <= 0 || VideoImage.ActualHeight <= 0)
+            return null;
+        var pos = e?.GetPosition(VideoImage) ?? Mouse.GetPosition(VideoImage);
+        int x = (int)Math.Round(pos.X / VideoImage.ActualWidth * src.PixelWidth);
+        int y = (int)Math.Round(pos.Y / VideoImage.ActualHeight * src.PixelHeight);
+        return (Math.Clamp(x, 0, src.PixelWidth - 1), Math.Clamp(y, 0, src.PixelHeight - 1));
+    }
+
+    /// <summary>Sends taps in order, one at a time. A drag's moves pile up faster than they go out; only the latest matters.</summary>
+    private async Task TouchLoopAsync(CancellationToken ct)
+    {
+        var reader = _touches.Reader;
+        try
+        {
+            while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            {
+                while (reader.TryRead(out var touch))
+                {
+                    while (touch.Action == TouchAction.Move && reader.TryPeek(out var next) && next.Action == TouchAction.Move)
+                        reader.TryRead(out touch);
+                    await _backend.SendTouchAsync(touch.View, touch.Action, touch.X, touch.Y, ct).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 }
 

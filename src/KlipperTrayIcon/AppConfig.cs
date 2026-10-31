@@ -23,6 +23,10 @@ public sealed class AppConfig
     [JsonPropertyName("webcam_console")] public bool WebcamConsole { get; set; } = true;
     /// <summary>Hide the commands timelapse macros send on every frame.</summary>
     [JsonPropertyName("console_hide_timelapse")] public bool ConsoleHideTimelapse { get; set; } = true;
+    /// <summary>Moonraker webcam to show; empty picks the first one.</summary>
+    [JsonPropertyName("webcam_name")] public string WebcamName { get; set; } = "";
+    /// <summary>Webcam the popup can switch to (e.g. a remote touchscreen); empty for none.</summary>
+    [JsonPropertyName("second_view_name")] public string SecondViewName { get; set; } = "";
 
     /// <summary>Keys this version doesn't know about, kept so saving doesn't drop them.</summary>
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }

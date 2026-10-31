@@ -148,6 +148,9 @@
 
             <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal"
                         HorizontalAlignment="Right" VerticalAlignment="Top">
+                <!-- Switches to the second view (picked in Settings) and back. -->
+                <Button x:Name="ViewButton" FontSize="12" Width="28" Height="24" Visibility="Collapsed"
+                        Style="{StaticResource PinButton}" Click="OnViewClick" />
                 <Button x:Name="PinButton" Content="&#xE718;" FontSize="12" Width="28" Height="24"
                         Style="{StaticResource PinButton}" Click="OnPinClick"
                         ToolTip="Pin: keep open when you click elsewhere" />

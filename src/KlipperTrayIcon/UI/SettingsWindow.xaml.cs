@@ -38,6 +38,7 @@ public partial class SettingsWindow : Window
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
         HideTimelapseCheck.IsChecked = config.ConsoleHideTimelapse;
+        FillSources(null, config.WebcamName, config.SecondViewName);
         IpBox.Text = config.BambuIp;
         SerialBox.Text = config.BambuSerial;
         CodeHidden.Password = config.BambuAccessCode;
@@ -46,6 +47,9 @@ public partial class SettingsWindow : Window
         AutostartCheck.IsChecked = firstRun || Autostart.IsEnabled;
 
         Loaded += (_, _) => (config.IsBambu ? (Control)IpBox : UrlBox).Focus();
+        // A printer that's already set up: list its cameras straight away.
+        if (!firstRun && !config.IsBambu)
+            Loaded += async (_, _) => await LoadSourcesAsync(config);
     }
 
     // ---- form behaviour ----------------------------------------------------
@@ -111,6 +115,8 @@ public partial class SettingsWindow : Window
             config.MoonrakerApiKey = Secret(ApiKeyHidden, ApiKeyVisible);
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
             config.ConsoleHideTimelapse = HideTimelapseCheck.IsChecked == true;
+            config.WebcamName = Selected(CameraCombo);
+            config.SecondViewName = Selected(SecondViewCombo);
         }
         else
         {
@@ -134,6 +140,57 @@ public partial class SettingsWindow : Window
         return config;
     }
 
+    // ---- camera sources --------------------------------------------------------
+
+    /// <summary>An entry in the camera lists; Name is what's saved (empty: automatic / none).</summary>
+    public sealed record SourceItem(string Name, string Label)
+    {
+        public override string ToString() => Label; // what screen readers announce
+    }
+
+    private static string Selected(ComboBox combo) => (combo.SelectedItem as SourceItem)?.Name ?? "";
+
+    /// <summary>Asks the printer for its cameras; on failure the lists just stay as they are.</summary>
+    private async Task LoadSourcesAsync(AppConfig config)
+    {
+        try
+        {
+            var webcams = await Task.Run(() => PrinterBackends.ListWebcamsAsync(config));
+            FillSources(webcams, Selected(CameraCombo), Selected(SecondViewCombo));
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>
+    /// Fills both lists, keeping the selections. A saved camera the printer
+    /// didn't list (or that hasn't been asked yet) still shows, so it isn't lost.
+    /// </summary>
+    private void FillSources(IReadOnlyList<WebcamInfo>? webcams, string camera, string secondView)
+    {
+        static List<SourceItem> Items(IReadOnlyList<WebcamInfo>? webcams, SourceItem first, string selected)
+        {
+            var items = new List<SourceItem> { first };
+            foreach (var cam in webcams ?? [])
+                items.Add(new SourceItem(cam.Name, $"{cam.Name}  ·  {cam.Service}{(cam.Enabled ? "" : ", disabled")}"));
+            if (selected.Length > 0 && !items.Exists(i => string.Equals(i.Name, selected, StringComparison.OrdinalIgnoreCase)))
+                items.Add(new SourceItem(selected, webcams == null ? selected : $"{selected}  ·  not found on the printer"));
+            return items;
+        }
+
+        static void Fill(ComboBox combo, List<SourceItem> items, string selected)
+        {
+            combo.ItemsSource = items;
+            combo.SelectedItem = items.Find(i => string.Equals(i.Name, selected, StringComparison.OrdinalIgnoreCase)) ?? items[0];
+        }
+
+        Fill(CameraCombo, Items(webcams, new SourceItem("", "Automatic (the first camera)"), camera), camera);
+        Fill(SecondViewCombo, Items(webcams, new SourceItem("", "None"), secondView), secondView);
+        if (webcams != null)
+            SourcesHint.Text = webcams.Count == 0
+                ? "The printer has no cameras set up (in Mainsail/Fluidd: Settings → Webcams)."
+                : "The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen, which you can click on.";
+    }
+
     private void Warn(string title, string text) =>
         MessageBox.Show(this, text, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
@@ -150,6 +207,8 @@ public partial class SettingsWindow : Window
         var (ok, message) = await Task.Run(() => PrinterBackends.TestConnectionAsync(config));
         TestResult.Text = (ok ? "✔ " : "✖ ") + message;
         TestResult.Foreground = new SolidColorBrush(ok ? Color.FromRgb(0x2E, 0x9E, 0x4F) : Color.FromRgb(0xD1, 0x34, 0x38));
+        if (ok && !config.IsBambu)
+            await LoadSourcesAsync(config);
         TestButton.IsEnabled = true;
         _testing = false;
     }

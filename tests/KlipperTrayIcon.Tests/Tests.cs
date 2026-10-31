@@ -210,10 +210,10 @@ public class MoonrakerTests
                 """;
         });
         var backend = new MoonrakerBackend("p.local", http: http);
-        var first = await backend.GetWebcamUrlsAsync(default);
-        var second = await backend.GetWebcamUrlsAsync(default);
-        Assert.Equal(("http://p.local/webcam/?action=stream", "http://p.local/webcam/?action=snapshot"), first);
-        Assert.Equal(first, second);
+        var first = await backend.GetViewSourceAsync(CameraView.Main, default);
+        var second = await backend.GetViewSourceAsync(CameraView.Main, default);
+        Assert.Equal(new ViewSource("http://p.local/webcam/?action=stream", "http://p.local/webcam/?action=snapshot", null), first);
+        Assert.Same(first, second);
         Assert.Equal(1, calls);
     }
 

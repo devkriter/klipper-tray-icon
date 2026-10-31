@@ -217,7 +217,7 @@ public sealed class FakeBambuCameraTests : IAsyncLifetime
         var started = DateTime.UtcNow;
         TimeSpan? firstFrameAfter = null;
         int frames = 0;
-        await foreach (var frame in backend.GetWebcamFramesAsync(cts.Token))
+        await foreach (var frame in backend.GetWebcamFramesAsync(CameraView.Main, cts.Token))
         {
             using (frame)
             {
@@ -252,7 +252,7 @@ public sealed class FakeBambuCameraTests : IAsyncLifetime
         using var backend = new BambuBackend("127.0.0.1", "SERIAL", "wrong", cameraPort: _camera.Port);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
         {
-            await foreach (var frame in backend.GetWebcamFramesAsync(default))
+            await foreach (var frame in backend.GetWebcamFramesAsync(CameraView.Main, default))
                 frame.Dispose();
         });
     }

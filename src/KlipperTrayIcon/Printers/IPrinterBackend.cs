@@ -87,6 +87,15 @@ public static class PrinterBackends
                                        webcamName: config.WebcamName, secondViewName: config.SecondViewName,
                                        webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream);
 
+    /// <summary>Whether the printer has a print queue, for the settings window. Throws if it can't be reached.</summary>
+    public static async Task<bool> HasPrintQueueAsync(AppConfig config, CancellationToken ct = default)
+    {
+        if (config.IsBambu)
+            return false;
+        using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
+        return await backend.HasJobQueueAsync(ct);
+    }
+
     /// <summary>The printer's cameras, for the settings window. Throws if it can't be reached.</summary>
     public static async Task<IReadOnlyList<WebcamInfo>> ListWebcamsAsync(AppConfig config, CancellationToken ct = default)
     {

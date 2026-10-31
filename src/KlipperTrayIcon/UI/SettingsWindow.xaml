@@ -157,6 +157,10 @@
             <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,8"
                       Content="Show the Klipper console next to the webcam"
                       ToolTip="It hides the same messages as Mainsail's console, using Mainsail's console filters." />
+            <!-- Off by default: it can start prints. Greyed out if the printer has no queue. -->
+            <CheckBox x:Name="QueueCheck" Grid.Row="8" Grid.ColumnSpan="3" Margin="0,0,0,8"
+                      Content="Show the print queue in the webcam popup"
+                      ToolTip="Queued jobs with drag-to-reorder, recent uploads to add, and a button that starts the next print." />
         </Grid>
 
         <!-- Bambu -->

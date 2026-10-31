@@ -28,6 +28,8 @@ public sealed class AppConfig
     /// <summary>How to fetch each: "h264", "mjpeg" or "snapshots"; empty picks the best one the camera offers.</summary>
     [JsonPropertyName("webcam_stream")] public string WebcamStream { get; set; } = "";
     [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
+    /// <summary>Show the print queue in the popup (Klipper / U1; can start prints, so off by default).</summary>
+    [JsonPropertyName("print_queue")] public bool PrintQueue { get; set; }
     /// <summary>Snapmaker U1: show its touchscreen (Remote Screen) in the popup, and send it taps.</summary>
     [JsonPropertyName("u1_touchscreen")] public bool U1Touchscreen { get; set; } = true;
 

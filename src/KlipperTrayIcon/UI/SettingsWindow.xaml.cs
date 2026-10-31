@@ -44,6 +44,7 @@ public partial class SettingsWindow : Window
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
+        QueueCheck.IsChecked = config.PrintQueue;
         FillSources(null, config.WebcamName, config.SecondViewName);
         FillStreams(CameraView.Main, null, config.WebcamStream);
         FillStreams(CameraView.Second, null, config.SecondViewStream);
@@ -149,6 +150,7 @@ public partial class SettingsWindow : Window
             config.MoonrakerUrl = url;
             config.MoonrakerApiKey = Secret(ApiKeyHidden, ApiKeyVisible);
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
+            config.PrintQueue = QueueCheck.IsChecked == true;
             config.WebcamName = Selected(CameraCombo);
             config.SecondViewName = Selected(SecondViewCombo);
             config.WebcamStream = Selected(CameraStreamCombo);
@@ -200,7 +202,19 @@ public partial class SettingsWindow : Window
             FillSources(webcams, Selected(CameraCombo), Selected(SecondViewCombo));
         }
         catch (Exception) { return; }
-        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second));
+        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckPrintQueueAsync(config));
+    }
+
+    /// <summary>The queue option only works if the printer's Moonraker has the job queue (it's optional).</summary>
+    private async Task CheckPrintQueueAsync(AppConfig config)
+    {
+        bool has;
+        try { has = await Task.Run(() => PrinterBackends.HasPrintQueueAsync(config)); }
+        catch (Exception) { return; } // can't tell: leave it as it is
+        QueueCheck.IsEnabled = has;
+        QueueCheck.Content = has
+            ? "Show the print queue in the webcam popup"
+            : "Show the print queue in the webcam popup (this printer has no print queue: add [job_queue] to moonraker.conf)";
     }
 
     private void OnCameraChanged(object sender, SelectionChangedEventArgs e)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.7.0] - 2026-10-31
+### Added
+- **Print queue** in the webcam popup (Klipper and U1 Extended; off by default, turn it on in
+  Settings). A title-bar button swaps the console for the printer's print queue (Moonraker's job
+  queue, the one Mainsail shows):
+  - queued jobs with the slicer's thumbnail and time estimate; drag the handle to reorder, ✕ to
+    remove;
+  - the five most recent uploads, each with ＋ to add it to the queue;
+  - *Start next* in the header, which needs a second click ("Confirm start") and only
+    shows when the printer can start a print.
+
+  The Settings option is greyed out for printers whose Moonraker has no job queue. Config key:
+  `print_queue`.
+
 ## [2.6.0] - 2026-10-31
 ### Changed
 - The **stream dropdowns** in Settings list every protocol the app supports (RTSP, H.264, MJPEG,

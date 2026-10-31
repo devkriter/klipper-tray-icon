@@ -1,0 +1,146 @@
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using KlipperTrayIcon.Printers;
+using KlipperTrayIcon.UI;
+using Xunit;
+
+namespace KlipperTrayIcon.Tests;
+
+/// <summary>The print queue against Moonraker's job_queue API.</summary>
+public class PrintQueueTests
+{
+    private static readonly byte[] Png = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+
+    /// <summary>A fake Moonraker that records what it's asked ("METHOD path body").</summary>
+    private sealed class FakeMoonraker : HttpMessageHandler
+    {
+        public readonly List<string> Requests = new();
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            string body = request.Content == null ? "" : " " + await request.Content.ReadAsStringAsync(ct);
+            string path = Uri.UnescapeDataString(request.RequestUri!.PathAndQuery);
+            lock (Requests)
+                Requests.Add($"{request.Method} {path}{body}");
+            string? json = path switch
+            {
+                "/server/info" => """{"result":{"components":["file_manager","job_queue","history"]}}""",
+                "/server/job_queue/status" => """
+                    {"result":{"queue_state":"paused","queued_jobs":[
+                      {"filename":"Benchy.gcode","job_id":"0001","time_added":1,"time_in_queue":2},
+                      {"filename":"parts/Clip.gcode","job_id":"0002","time_added":1,"time_in_queue":2}]}}
+                    """,
+                "/server/files/list?root=gcodes" => """
+                    {"result":[{"path":"old.gcode","modified":100},{"path":"parts/Clip.gcode","modified":300},
+                               {"path":"Benchy.gcode","modified":200}]}
+                    """,
+                "/server/files/metadata?filename=parts/Clip.gcode" => """
+                    {"result":{"estimated_time":2280,"thumbnails":[
+                      {"width":32,"relative_path":".thumbs/Clip-32x32.png"},
+                      {"width":300,"relative_path":".thumbs/Clip-300x300.png"},
+                      {"width":48,"relative_path":".thumbs/Clip-48x48.png"}]}}
+                    """,
+                _ => request.Method == HttpMethod.Get ? null : """{"result":"ok"}""",
+            };
+            if (path == "/server/files/gcodes/parts/.thumbs/Clip-48x48.png")
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) };
+            return json == null
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        }
+    }
+
+    private static (MoonrakerBackend Backend, FakeMoonraker Printer) Make()
+    {
+        var printer = new FakeMoonraker();
+        return (new MoonrakerBackend("p", http: new HttpClient(printer)), printer);
+    }
+
+    [Fact]
+    public async Task ReadsTheQueue()
+    {
+        var (backend, _) = Make();
+        var status = await backend.GetQueueAsync(default);
+        Assert.Equal("paused", status.State);
+        Assert.Equal([new QueuedJob("0001", "Benchy.gcode"), new QueuedJob("0002", "parts/Clip.gcode")], status.Jobs);
+        Assert.True(await backend.HasJobQueueAsync(default));
+    }
+
+    [Fact]
+    public async Task RecentFilesAreNewestFirst()
+    {
+        var (backend, _) = Make();
+        Assert.Equal(["parts/Clip.gcode", "Benchy.gcode"], (await backend.GetRecentFilesAsync(2, default)).Select(f => f.Path));
+    }
+
+    [Fact]
+    public async Task FileDetailsHaveTheEstimateAndASmallThumbnail()
+    {
+        var (backend, printer) = Make();
+        var details = await backend.GetFileDetailsAsync("parts/Clip.gcode", default);
+        Assert.Equal(2280, details.EstimatedSeconds);
+        Assert.Equal(Png, details.Thumbnail); // the 48 px one, from next to the file
+        await backend.GetFileDetailsAsync("parts/Clip.gcode", default);
+        Assert.Single(printer.Requests, r => r.Contains("/server/files/metadata")); // cached
+    }
+
+    [Fact]
+    public async Task ChangesGoToTheJobQueueApi()
+    {
+        var (backend, printer) = Make();
+        await backend.AddToQueueAsync("parts/Clip.gcode", default);
+        await backend.RemoveFromQueueAsync("0001", default);
+        await backend.ReorderQueueAsync(["parts/Clip.gcode", "Benchy.gcode"], default);
+        await backend.StartQueueAsync(default);
+        Assert.Equal([
+            """POST /server/job_queue/job {"filenames":["parts/Clip.gcode"]}""",
+            "DELETE /server/job_queue/job?job_ids=0001",
+            """POST /server/job_queue/job {"filenames":["parts/Clip.gcode","Benchy.gcode"],"reset":true}""",
+            "POST /server/job_queue/start",
+        ], printer.Requests);
+    }
+
+    [Fact]
+    public async Task FailedChangesThrow()
+    {
+        var backend = new MoonrakerBackend("p", http: new HttpClient(new Refusing()));
+        await Assert.ThrowsAsync<MoonrakerHttpException>(() => backend.StartQueueAsync(default));
+    }
+
+    private sealed class Refusing : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest));
+    }
+
+    [Theory]
+    [InlineData("""{"thumbnails":[{"width":32,"relative_path":"a"},{"width":300,"relative_path":"b"},{"width":48,"relative_path":"c"}]}""", "c")]
+    [InlineData("""{"thumbnails":[{"width":16,"relative_path":"a"},{"width":32,"relative_path":"b"}]}""", "b")]
+    [InlineData("""{}""", null)]
+    public void PicksASmallThumbnail(string meta, string? expected)
+    {
+        using var doc = JsonDocument.Parse(meta);
+        Assert.Equal(expected, MoonrakerBackend.PickThumbnail(doc.RootElement));
+    }
+
+    [Theory]
+    [InlineData("Benchy.gcode", "Benchy")]
+    [InlineData("parts/Clip_x4.GCODE", "Clip_x4")]
+    [InlineData("notes.txt", "notes.txt")]
+    public void ShowsFileNamesWithoutFolderOrExtension(string path, string name) =>
+        Assert.Equal(name, WebcamPopup.DisplayName(path));
+
+    [Theory]
+    [InlineData(20, "just now")]
+    [InlineData(150, "2 min ago")]
+    [InlineData(3 * 3600 + 10, "3 h ago")]
+    [InlineData(30 * 3600, "yesterday")]
+    [InlineData(5 * 86400, "5 days ago")]
+    public void SaysHowLongAgo(int seconds, string text)
+    {
+        var now = new DateTimeOffset(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(text, WebcamPopup.Ago(now.AddSeconds(-seconds), now));
+    }
+}

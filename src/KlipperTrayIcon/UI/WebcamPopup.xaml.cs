@@ -34,7 +34,8 @@ public partial class WebcamPopup : Window
     private static readonly TimeSpan ToggleWindow = TimeSpan.FromMilliseconds(400);
 
     private readonly IPrinterBackend _backend;
-    private readonly bool _showConsole;
+    // The side panel (stats strip plus the console and/or the print queue).
+    private readonly bool _showPanel;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConsoleFeed? _console;
 
@@ -69,21 +70,25 @@ public partial class WebcamPopup : Window
     // Reused for every raw frame of the same size (Bambu), instead of a new bitmap per frame.
     private WriteableBitmap? _video;
 
-    public WebcamPopup(IPrinterBackend backend, bool showConsole)
+    public WebcamPopup(IPrinterBackend backend, bool showConsole, bool showQueue = false)
     {
         InitializeComponent();
         _backend = backend;
-        _showConsole = showConsole;
+        showQueue &= backend is IPrintQueue;
+        _showPanel = showConsole || showQueue;
 
         ResetSize();
         MinWidth = VideoWidth / 2 + 2;
         MinHeight = PopupHeight / 2;
-        if (showConsole)
+        if (_showPanel)
         {
             ConsolePanel.Visibility = Visibility.Visible;
             Layout.SizeChanged += (_, _) => UpdateArrangement();
             UpdateArrangement();
-            _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+            if (showConsole)
+                _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+            if (showQueue)
+                SetUpQueue((IPrintQueue)backend, consoleToo: showConsole);
             ShowStatus(PrinterStatus.Connecting);
         }
         if (backend.SecondViewName != null)
@@ -170,6 +175,7 @@ public partial class WebcamPopup : Window
         Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
         _console?.Resume();
+        _queueWake = true; // fresh queue on opening, not up to a refresh later
         StartSession();
     }
 
@@ -194,7 +200,7 @@ public partial class WebcamPopup : Window
 
     private void ResetSize()
     {
-        Width = VideoWidth + 2 + (_showConsole ? ConsoleWidth : 0);
+        Width = VideoWidth + 2 + (_showPanel ? ConsoleWidth : 0);
         Height = PopupHeight;
     }
 
@@ -268,7 +274,7 @@ public partial class WebcamPopup : Window
     {
         for (; element != null; element = element is Visual or System.Windows.Media.Media3D.Visual3D
                                      ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element))
-            if (element is System.Windows.Controls.Primitives.ButtonBase)
+            if (element is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Controls.Primitives.Thumb)
                 return true;
         return false;
     }
@@ -333,7 +339,7 @@ public partial class WebcamPopup : Window
 
     private void UpdateArrangement()
     {
-        if (!_showConsole || Layout.ActualWidth <= 0)
+        if (!_showPanel || Layout.ActualWidth <= 0)
             return;
         double aspect = VideoImage.Source is BitmapSource { PixelHeight: > 0 } src
             ? (double)src.PixelWidth / src.PixelHeight
@@ -352,8 +358,8 @@ public partial class WebcamPopup : Window
 
     private static readonly string[] StatLabels = ["NOZZLE", "BED", "PROGRESS", "LAYER", "TIME LEFT"];
 
-    /// <summary>True when the popup shows the stats strip (it comes with the console).</summary>
-    public bool HasStats => _showConsole;
+    /// <summary>True when the popup shows the stats strip (it tops the side panel: console and/or queue).</summary>
+    public bool HasStats => _showPanel;
 
     /// <summary>Latest printer status, for the stats strip above the console (UI thread).</summary>
     public void ShowStatus(PrinterStatus status)
@@ -363,7 +369,8 @@ public partial class WebcamPopup : Window
         TitleText.Text = $"{_backend.DisplayName} · {headline}";
         Title = TitleText.Text; // the taskbar button, when pinned
         StateDot.Fill = StateBrush(status.State);
-        if (!_showConsole)
+        QueueSawStatus(status);
+        if (!_showPanel)
             return;
         var tiles = StatusText.StatsTiles(status);
         var items = new StatTile[tiles.Length];

@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 namespace KlipperTrayIcon.Printers;
 
 /// <summary>Klipper via Moonraker's HTTP API (what Mainsail and Fluidd talk to).</summary>
-public sealed class MoonrakerBackend : IPrinterBackend
+public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
 {
     private static readonly HttpClient SharedHttp = new(new SocketsHttpHandler
     {
@@ -258,6 +258,126 @@ public sealed class MoonrakerBackend : IPrinterBackend
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
             return (false, DescribeError(e));
+        }
+    }
+
+    // ---- print queue (Moonraker's job_queue) ------------------------------------
+
+    private readonly Dictionary<string, GcodeDetails> _details = new();
+
+    /// <summary>Whether this Moonraker has the job queue (it's an optional component). Throws if unreachable.</summary>
+    public async Task<bool> HasJobQueueAsync(CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync("/server/info", TimeSpan.FromSeconds(3), ct);
+        var components = doc.RootElement.Prop("result").Prop("components");
+        return components.ValueKind == JsonValueKind.Array
+               && components.EnumerateArray().Any(c => c.GetString() == "job_queue");
+    }
+
+    public async Task<QueueStatus> GetQueueAsync(CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync("/server/job_queue/status", TimeSpan.FromSeconds(3), ct);
+        var result = doc.RootElement.Prop("result");
+        var jobs = result.Prop("queued_jobs");
+        return new QueueStatus(result.Str("queue_state", "paused"),
+            jobs.ValueKind != JsonValueKind.Array ? []
+                : jobs.EnumerateArray().Select(j => new QueuedJob(j.Str("job_id"), j.Str("filename"))).ToList());
+    }
+
+    public async Task<IReadOnlyList<GcodeFile>> GetRecentFilesAsync(int count, CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync("/server/files/list?root=gcodes", TimeSpan.FromSeconds(5), ct);
+        var files = doc.RootElement.Prop("result");
+        if (files.ValueKind != JsonValueKind.Array)
+            return [];
+        var recent = files.EnumerateArray()
+            .Select(f => new GcodeFile(f.Str("path"), f.Num("modified")))
+            .Where(f => f.Path.Length > 0)
+            .OrderByDescending(f => f.Modified)
+            .Take(count)
+            .ToList();
+        lock (_details)
+        {
+            foreach (var f in recent)
+            {
+                // Uploaded again under the same name: its details are out of date.
+                if (_detailsModified.TryGetValue(f.Path, out double seen) && seen != f.Modified)
+                    _details.Remove(f.Path);
+                _detailsModified[f.Path] = f.Modified;
+            }
+        }
+        return recent;
+    }
+
+    // When each file's cached details were for (its modified time).
+    private readonly Dictionary<string, double> _detailsModified = new();
+
+    public async Task<GcodeDetails> GetFileDetailsAsync(string path, CancellationToken ct)
+    {
+        lock (_details)
+            if (_details.TryGetValue(path, out var cached))
+                return cached;
+        using var doc = await GetJsonAsync("/server/files/metadata?filename=" + Uri.EscapeDataString(path),
+                                           TimeSpan.FromSeconds(3), ct);
+        var meta = doc.RootElement.Prop("result");
+        byte[]? thumbnail = null;
+        if (PickThumbnail(meta) is string relative)
+        {
+            // Thumbnails sit next to the file (e.g. ".thumbs/name-48x48.png").
+            string folder = path.Contains('/') ? path[..(path.LastIndexOf('/') + 1)] : "";
+            string url = BaseUrl + "/server/files/gcodes/" +
+                         string.Join("/", (folder + relative).Split('/').Select(Uri.EscapeDataString));
+            thumbnail = (await FetchImageAsync(url, null, TimeSpan.FromSeconds(3), ct)).Image;
+        }
+        var details = new GcodeDetails(meta.Num("estimated_time") is > 0 and var t ? t : null, thumbnail);
+        lock (_details)
+            _details[path] = details;
+        return details;
+    }
+
+    /// <summary>The smallest thumbnail at least 48 px wide (the list shows them at 40), else the biggest.</summary>
+    internal static string? PickThumbnail(JsonElement meta)
+    {
+        var thumbs = meta.Prop("thumbnails");
+        if (thumbs.ValueKind != JsonValueKind.Array)
+            return null;
+        var all = thumbs.EnumerateArray()
+            .Select(t => (Width: t.Num("width"), Path: t.Str("relative_path")))
+            .Where(t => t.Path.Length > 0)
+            .ToList();
+        var fitting = all.Where(t => t.Width >= 48).OrderBy(t => t.Width).ToList();
+        return fitting.Count > 0 ? fitting[0].Path : all.OrderByDescending(t => t.Width).Select(t => t.Path).FirstOrDefault();
+    }
+
+    public Task AddToQueueAsync(string path, CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/server/job_queue/job", new { filenames = new[] { path } }, ct);
+
+    public Task RemoveFromQueueAsync(string jobId, CancellationToken ct) =>
+        SendAsync(HttpMethod.Delete, "/server/job_queue/job?job_ids=" + Uri.EscapeDataString(jobId), null, ct);
+
+    public Task ReorderQueueAsync(IReadOnlyList<string> paths, CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/server/job_queue/job", new { filenames = paths, reset = true }, ct);
+
+    public Task StartQueueAsync(CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/server/job_queue/start", null, ct);
+
+    /// <summary>A request that changes something on the printer. Throws unless it succeeds.</summary>
+    private async Task SendAsync(HttpMethod method, string pathAndQuery, object? json, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        using var request = Request(method, BaseUrl + pathAndQuery);
+        if (json != null)
+            request.Content = new StringContent(JsonSerializer.Serialize(json), System.Text.Encoding.UTF8, "application/json");
+        try
+        {
+            using var response = await _http.SendAsync(request, cts.Token);
+            if (!response.IsSuccessStatusCode)
+                throw new MoonrakerHttpException(response.StatusCode);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"{BaseUrl} didn't respond in time");
         }
     }
 

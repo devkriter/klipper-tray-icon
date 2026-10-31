@@ -58,6 +58,158 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Print queue: small buttons in the rows, and the start button. -->
+        <Style x:Key="RowButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#BDBDBD" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#333333" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Start next: small and quiet, in the queue's header. Turns amber when armed. -->
+        <Style x:Key="StartButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#DADADA" />
+            <Setter Property="Background" Value="#262626" />
+            <Setter Property="BorderBrush" Value="#3A3A3A" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="9,0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- A thin, dark scroll bar that doesn't compete with the content. -->
+        <Style x:Key="SubtleScrollBar" TargetType="ScrollBar">
+            <Setter Property="Width" Value="8" />
+            <Setter Property="MinWidth" Value="8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" Margin="0,2">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False" />
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False" />
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb>
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border x:Name="Bar" Background="#3A3A3A" CornerRadius="2" Width="4"
+                                                    HorizontalAlignment="Center" />
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bar" Property="Background" Value="#5A5A5A" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- A thumbnail (the slicer's preview), a name and a detail line. -->
+        <DataTemplate x:Key="FileInfo">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition />
+                </Grid.ColumnDefinitions>
+                <Border Width="40" Height="40" Background="#3A3A3A" CornerRadius="3" Margin="0,0,9,0">
+                    <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" Foreground="#ECECEC" FontSize="13" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding Path}" />
+                    <TextBlock Text="{Binding Detail}" Foreground="#9A9A9A" FontSize="11" Margin="0,1,0,0" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+        <!-- A queued job: drag the handle to reorder, ✕ (on hover) to remove. -->
+        <DataTemplate x:Key="QueueRow">
+            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="2,4,4,4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Thumb x:Name="Handle" Width="22" Cursor="SizeNS" ToolTip="Drag to change the order" Tag="#4A4A4A"
+                           DragStarted="OnQueueDragStarted" DragDelta="OnQueueDragDelta" DragCompleted="OnQueueDragCompleted">
+                        <Thumb.Template>
+                            <ControlTemplate>
+                                <Border Background="Transparent">
+                                    <TextBlock Text="&#xE784;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13"
+                                               Foreground="{Binding Tag, RelativeSource={RelativeSource AncestorType=Thumb}}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </ControlTemplate>
+                        </Thumb.Template>
+                    </Thumb>
+                    <ContentPresenter Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
+                    <Button x:Name="Remove" Grid.Column="2" Content="&#x2715;" FontSize="11" Style="{StaticResource RowButton}"
+                            Visibility="Hidden" ToolTip="Remove from the queue" Click="OnQueueRemoveClick" />
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Row" Property="Background" Value="#1E1E1E" />
+                    <Setter TargetName="Remove" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Handle" Property="Tag" Value="#9A9A9A" />
+                </Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <!-- A recently uploaded file: ＋ adds it to the queue. -->
+        <DataTemplate x:Key="RecentRow">
+            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="2,4,4,4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="22" /> <!-- where queued rows have their handle -->
+                        <ColumnDefinition />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ContentPresenter Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
+                    <Button Grid.Column="2" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Style="{StaticResource RowButton}" ToolTip="Add to the queue" Click="OnQueueAddClick" />
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Row" Property="Background" Value="#1E1E1E" />
+                </Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
     </Window.Resources>
 
     <Border x:Name="Frame" BorderBrush="#404040" BorderThickness="1">
@@ -71,6 +223,9 @@
                     <!-- Only on a view that takes taps; locked (view-only) until clicked. -->
                     <Button x:Name="TouchButton" FontSize="13" Visibility="Collapsed"
                             Style="{StaticResource PinButton}" Click="OnTouchLockClick" />
+                    <!-- Switches the side panel between the console and the print queue. -->
+                    <Button x:Name="QueueButton" FontSize="13" Visibility="Collapsed"
+                            Style="{StaticResource PinButton}" Click="OnQueueButtonClick" />
                     <Button x:Name="PinButton" Content="&#xE718;" FontSize="13"
                             Style="{StaticResource PinButton}" Click="OnPinClick"
                             ToolTip="Pin: keep open when you click elsewhere" />
@@ -151,6 +306,8 @@
                             </Rectangle>
                         </Grid>
                     </Border>
+                    <Grid>
+                    <DockPanel x:Name="ConsoleView">
                     <TextBlock DockPanel.Dock="Top" Text="CONSOLE" Foreground="#9A9A9A" FontSize="11"
                                FontWeight="SemiBold" Margin="12,7,12,6" />
                     <ScrollViewer x:Name="ConsoleScroll" VerticalScrollBarVisibility="Hidden"
@@ -177,6 +334,36 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                    </DockPanel>
+
+                    <!-- Print queue (Moonraker's job queue), in place of the console. -->
+                    <DockPanel x:Name="QueueView" Visibility="Collapsed">
+                        <Grid DockPanel.Dock="Top" Margin="12,5,10,5" MinHeight="22">
+                            <TextBlock x:Name="QueueHeader" Text="QUEUE" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <!-- Either the start button, or why there's nothing to start. -->
+                            <TextBlock x:Name="QueueStateText" Foreground="#8C8C8C" FontSize="11" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="90,0,0,0" />
+                            <Button x:Name="StartNextButton" Style="{StaticResource StartButton}" Click="OnStartNextClick"
+                                    HorizontalAlignment="Right" Visibility="Collapsed" />
+                        </Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                      PanningMode="VerticalOnly">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
+                            </ScrollViewer.Resources>
+                            <StackPanel Margin="6,0,8,8">
+                                <ItemsControl x:Name="QueueList" ItemTemplate="{StaticResource QueueRow}" />
+                                <TextBlock x:Name="QueueEmpty" Text="Nothing queued. Add a file from the recent uploads below."
+                                           Foreground="#8C8C8C" FontSize="12" FontStyle="Italic" TextWrapping="Wrap"
+                                           Margin="6,2,6,4" Visibility="Collapsed" />
+                                <TextBlock Text="RECENT UPLOADS" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
+                                           Margin="6,14,6,6" />
+                                <ItemsControl x:Name="RecentList" ItemTemplate="{StaticResource RecentRow}" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                    </Grid>
                 </DockPanel>
             </Border>
 

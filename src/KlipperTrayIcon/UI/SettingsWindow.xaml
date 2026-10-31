@@ -18,10 +18,11 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,4,0,12" />
         </Style>
-        <!-- In the open list each stream has a line saying what it is; the closed box shows just its name. -->
+        <!-- In the open list each stream has a line saying what it is; the closed box shows just its name.
+             Streams the camera doesn't offer are greyed out and can't be picked. -->
         <DataTemplate x:Key="StreamItem">
             <StackPanel Margin="0,3">
-                <TextBlock Text="{Binding Label}" />
+                <TextBlock x:Name="Label" Text="{Binding Label}" />
                 <TextBlock x:Name="Description" Text="{Binding Description}" FontSize="12" Opacity="0.65"
                            TextWrapping="Wrap" MaxWidth="320" Margin="0,2,0,0" />
             </StackPanel>
@@ -29,15 +30,21 @@
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
                     <Setter TargetName="Description" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding Available}" Value="False">
+                    <Setter TargetName="Label" Property="Opacity" Value="0.5" />
+                </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
+        <Style x:Key="StreamItemContainer" TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <Setter Property="IsEnabled" Value="{Binding Available}" />
+        </Style>
         <ToolTip x:Key="StreamTip">
             <TextBlock TextWrapping="Wrap" MaxWidth="360">
-                <Run Text="How the picture is fetched. Only what this camera offers is listed." FontWeight="SemiBold" />
+                <Run Text="How the picture is fetched. Streams this camera doesn't offer are greyed out." FontWeight="SemiBold" />
                 <LineBreak /><LineBreak />
                 <Run Text="•  RTSP: compressed H.264 video over RTSP, the standard protocol for network cameras." />
                 <LineBreak />
-                <Run Text="•  H.264: compressed H.264 video over HTTP. Both use far less bandwidth than MJPEG." />
+                <Run Text="•  H.264: the same video as a plain stream over HTTP, without RTSP's timing. RTSP is better when both are offered. Both use far less bandwidth than MJPEG." />
                 <LineBreak />
                 <Run Text="•  MJPEG: a continuous series of JPEG pictures. Works with almost every camera." />
                 <LineBreak />
@@ -131,14 +138,16 @@
             <TextBlock Grid.Row="4" Text="Camera" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="CameraCombo" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8"
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
-            <!-- How each camera is fetched: whatever the printer turned out to offer. -->
+            <!-- How each camera is fetched: every kind the app supports, greyed out where the camera doesn't offer it. -->
             <ComboBox x:Name="CameraStreamCombo" Grid.Row="4" Grid.Column="2" Width="170" Margin="8,0,0,8"
-                      ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
+                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
+                      ToolTip="{StaticResource StreamTip}" />
             <TextBlock x:Name="SecondViewLabel" Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1"
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
             <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="5" Grid.Column="2" Width="170" Margin="8,0,0,0"
-                      ItemTemplate="{StaticResource StreamItem}" ToolTip="{StaticResource StreamTip}" />
+                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
+                      ToolTip="{StaticResource StreamTip}" />
             <!-- Snapmaker U1, in place of the second view: its touchscreen. -->
             <CheckBox x:Name="TouchscreenCheck" Grid.Row="5" Grid.ColumnSpan="3" Visibility="Collapsed"
                       Content="Show the printer's touchscreen in the webcam popup, and let me use it" />

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -178,8 +179,11 @@ public partial class SettingsWindow : Window
 
     // ---- camera sources --------------------------------------------------------
 
-    /// <summary>An entry in the camera lists; Name is what's saved (empty: automatic / none).</summary>
-    public sealed record SourceItem(string Name, string Label, string Description = "")
+    /// <summary>
+    /// An entry in the camera lists; Name is what's saved (empty: automatic / none).
+    /// Not Available: shown greyed out and can't be picked.
+    /// </summary>
+    public sealed record SourceItem(string Name, string Label, string Description = "", bool Available = true)
     {
         public override string ToString() => Label; // what screen readers announce
     }
@@ -228,7 +232,8 @@ public partial class SettingsWindow : Window
     {
         StreamKind.Rtsp => "Compressed H.264 video over RTSP, the standard protocol for network cameras. " +
                            "Smooth, with little delay and low network use.",
-        StreamKind.H264 => "Compressed H.264 video sent over HTTP. Low network use, like RTSP.",
+        StreamKind.H264 => "The same compressed video, sent as a plain stream over HTTP. It has no timing " +
+                           "information like RTSP, so RTSP is the better choice when both are offered.",
         StreamKind.Mjpeg => "A continuous series of JPEG pictures. Works with almost every camera, but uses much " +
                             "more network bandwidth, especially at high resolutions.",
         _ => "Single pictures, fetched about ten times a second. Works with any camera or screen that offers " +
@@ -236,28 +241,39 @@ public partial class SettingsWindow : Window
     };
 
     /// <summary>
-    /// "Automatic (H.264)" plus each stream the camera offers. A saved choice
-    /// it doesn't offer still shows, so it isn't lost. Off while the second
-    /// view is None.
+    /// "Automatic (RTSP)" plus every stream the app supports, best first. Those
+    /// the camera didn't offer are greyed out; a saved one among them stays
+    /// selected, so it isn't lost (Automatic is used for it). Before the camera
+    /// has been asked (kinds null or empty) all of them can be picked.
     /// </summary>
-    private void FillStreams(CameraView view, IReadOnlyList<StreamKind>? kinds, string selected)
+    internal static List<SourceItem> StreamItems(IReadOnlyList<StreamKind>? kinds, string selected)
     {
-        var combo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
+        bool known = kinds is { Count: > 0 };
         var items = new List<SourceItem>
         {
-            kinds is { Count: > 0 }
-                ? new("", $"Automatic ({StreamKinds.Label(kinds[0])})",
+            known
+                ? new("", $"Automatic ({StreamKinds.Label(kinds![0])})",
                       $"Uses {StreamKinds.Label(kinds[0])}, the best stream this camera offers." +
                       (kinds[0] is StreamKind.Rtsp or StreamKind.H264 ? " Switches to MJPEG if it keeps dropping." : ""))
                 : new("", "Automatic", "Uses the best stream the camera offers."),
         };
-        foreach (var kind in kinds ?? [])
-            items.Add(new SourceItem(StreamKinds.ToConfig(kind), StreamKinds.Label(kind), StreamDescription(kind)));
-        if (StreamKinds.Parse(selected) is { } saved && !items.Exists(i => i.Name == StreamKinds.ToConfig(saved)))
-            items.Add(new SourceItem(StreamKinds.ToConfig(saved),
-                                     kinds == null ? StreamKinds.Label(saved) : $"{StreamKinds.Label(saved)} · not offered",
-                                     kinds == null ? StreamDescription(saved)
-                                                   : "The camera didn't offer this when asked; Automatic is used instead."));
+        var saved = StreamKinds.Parse(selected);
+        foreach (var kind in Enum.GetValues<StreamKind>())
+        {
+            bool offered = !known || kinds!.Contains(kind);
+            string description = offered ? StreamDescription(kind)
+                : kind == saved ? "Not offered by this camera, so Automatic is used instead."
+                : "Not offered by this camera.";
+            items.Add(new SourceItem(StreamKinds.ToConfig(kind), StreamKinds.Label(kind), description, offered));
+        }
+        return items;
+    }
+
+    /// <summary>Lists the streams for a view, keeping the selection. Off while the second view is None.</summary>
+    private void FillStreams(CameraView view, IReadOnlyList<StreamKind>? kinds, string selected)
+    {
+        var combo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
+        var items = StreamItems(kinds, selected);
         combo.ItemsSource = items;
         combo.SelectedItem = items.Find(i => i.Name == (StreamKinds.Parse(selected) is { } k ? StreamKinds.ToConfig(k) : "")) ?? items[0];
         combo.IsEnabled = view == CameraView.Main || Selected(SecondViewCombo).Length > 0;

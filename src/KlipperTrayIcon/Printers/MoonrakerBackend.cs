@@ -23,7 +23,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
     private readonly HttpClient _http;
     private readonly Dictionary<string, string> _headers = new();
     private string? _lastFilename;
-    private double? _cachedEstimatedTime;
+    private GcodeFileInfo _fileInfo = GcodeFileInfo.None;
     private (string Stream, string Snapshot)? _webcamUrls;
 
     public MoonrakerBackend(string moonrakerUrl, string apiKey = "", HttpClient? http = null)
@@ -96,8 +96,10 @@ public sealed class MoonrakerBackend : IPrinterBackend
     {
         try
         {
-            using var doc = await GetJsonAsync("/printer/objects/query?print_stats&display_status&virtual_sdcard",
-                                               TimeSpan.FromSeconds(2), ct);
+            using var doc = await GetJsonAsync(
+                "/printer/objects/query?print_stats&display_status&virtual_sdcard" +
+                "&extruder=temperature,target&heater_bed=temperature,target&gcode_move=gcode_position",
+                TimeSpan.FromSeconds(2), ct);
             var status = doc.RootElement.Prop("result").Prop("status");
             var printStats = status.Prop("print_stats");
 
@@ -114,15 +116,14 @@ public sealed class MoonrakerBackend : IPrinterBackend
             if (filename != _lastFilename)
             {
                 _lastFilename = filename;
-                _cachedEstimatedTime = null;
+                _fileInfo = GcodeFileInfo.None;
                 if (filename.Length > 0)
                 {
                     try
                     {
                         using var meta = await GetJsonAsync(
                             "/server/files/metadata?filename=" + Uri.EscapeDataString(filename), TimeSpan.FromSeconds(2), ct);
-                        double estimated = meta.RootElement.Prop("result").Num("estimated_time");
-                        _cachedEstimatedTime = estimated > 0 ? estimated : null;
+                        _fileInfo = GcodeFileInfo.From(meta.RootElement.Prop("result"));
                     }
                     catch (Exception) when (!ct.IsCancellationRequested)
                     {
@@ -135,7 +136,7 @@ public sealed class MoonrakerBackend : IPrinterBackend
             string etaSource = "Calc";
             if (state == "printing")
             {
-                if (_cachedEstimatedTime is double estimate)
+                if (_fileInfo.EstimatedTime is double estimate)
                 {
                     timeLeft = Math.Max(0, estimate - printDuration);
                     etaSource = "Slicer";
@@ -146,12 +147,56 @@ public sealed class MoonrakerBackend : IPrinterBackend
                     etaSource = "Calc";
                 }
             }
-            return new PrinterStatus(state, progress, filename, timeLeft, etaSource);
+            return new PrinterStatus(state, progress, filename, timeLeft, etaSource,
+                                     Details: ReadDetails(status, state, _fileInfo));
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
             return PrinterStatus.Offline(DescribeError(e));
         }
+    }
+
+    private static PrintDetails ReadDetails(JsonElement status, string state, GcodeFileInfo file)
+    {
+        static Heater? ReadHeater(JsonElement h) =>
+            h.ValueKind == JsonValueKind.Object ? new Heater(h.Num("temperature"), h.Num("target")) : null;
+
+        var position = status.Prop("gcode_move").Prop("gcode_position");
+        double z = position.ValueKind == JsonValueKind.Array && position.GetArrayLength() > 2
+                   && position[2].TryGetDouble(out double pz) ? pz : 0;
+        int? layer = null, total = null;
+        if (state is "printing" or "paused")
+        {
+            // Klipper knows the layer when the slicer calls SET_PRINT_STATS_INFO;
+            // otherwise work it out from Z and the file's layer heights, like Mainsail does.
+            var info = status.Prop("print_stats").Prop("info");
+            total = Positive(info.Opt("total_layer")) ?? file.LayerCount;
+            layer = Positive(info.Opt("current_layer")) ?? file.LayerAt(z);
+            if (layer != null && total != null)
+                layer = Math.Min(layer.Value, total.Value);
+        }
+        return new PrintDetails(ReadHeater(status.Prop("extruder")), ReadHeater(status.Prop("heater_bed")), layer, total, z);
+    }
+
+    private static int? Positive(double? value) => value > 0 ? (int)value : null;
+
+    /// <summary>What we use from a G-code file's metadata.</summary>
+    private sealed record GcodeFileInfo(double? EstimatedTime, int? LayerCount, double LayerHeight, double FirstLayerHeight)
+    {
+        public static readonly GcodeFileInfo None = new(null, null, 0, 0);
+
+        public static GcodeFileInfo From(JsonElement meta)
+        {
+            double layerHeight = meta.Num("layer_height"), first = meta.Num("first_layer_height", layerHeight);
+            int? count = Positive(meta.Opt("layer_count"));
+            double height = meta.Num("object_height");
+            if (count == null && layerHeight > 0 && height > 0)
+                count = (int)Math.Ceiling((height - first) / layerHeight + 1 - 1e-6);
+            return new GcodeFileInfo(meta.Num("estimated_time") is > 0 and var t ? t : null, count, layerHeight, first);
+        }
+
+        public int? LayerAt(double z) =>
+            LayerHeight > 0 && z > 0 ? Math.Max(1, (int)Math.Ceiling((z - FirstLayerHeight) / LayerHeight + 1 - 1e-6)) : null;
     }
 
     public async Task<(bool Ok, string Message)> TestConnectionAsync(CancellationToken ct)
@@ -280,6 +325,13 @@ internal static class JsonExtensions
     {
         var value = e.Prop(name);
         return value.ValueKind == JsonValueKind.String ? value.GetString() ?? fallback : fallback;
+    }
+
+    /// <summary>The number, or null if it's missing or not a number (e.g. JSON null).</summary>
+    public static double? Opt(this JsonElement e, string name)
+    {
+        var value = e.Prop(name);
+        return value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out double d) ? d : null;
     }
 
     public static double Num(this JsonElement e, string name, double fallback = 0)

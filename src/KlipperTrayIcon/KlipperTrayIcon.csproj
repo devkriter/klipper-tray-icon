@@ -25,7 +25,7 @@
          single-file compression (it would hold the whole runtime in RAM).
          ReadyToRun isn't used: the popup's warm-up already makes the first
          show fast, and it would add ~6 MB and more memory. -->
-    <Version>2.0.1</Version>
+    <Version>2.1.0</Version>
     <Product>Klipper Tray Icon</Product>
     <Company>sturkfurkan</Company>
     <Copyright>sturkfurkan</Copyright>

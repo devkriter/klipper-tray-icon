@@ -29,6 +29,46 @@ public class StatusTextTests
         Assert.Equal(["Print complete", "a.gcode"], StatusText.Lines(new PrinterStatus("complete", 1, "a.gcode")));
 
     [Fact]
+    public void StatsTilesWhilePrinting()
+    {
+        var now = new DateTime(2026, 1, 1, 23, 0, 0);
+        var details = new PrintDetails(new Heater(214.6, 215), new Heater(48, 60), 57, 210, 11.4);
+        var tiles = StatusText.StatsTiles(new PrinterStatus("printing", 0.42, "a.gcode", 5000, "Slicer", Details: details), now);
+        Assert.Equal(new StatusText.Tile("215°", "of 215°"), tiles[0]);
+        Assert.Equal(new StatusText.Tile("48°", "of 60°", Highlight: true), tiles[1]); // still heating
+        Assert.Equal(new StatusText.Tile("42%", "Printing"), tiles[2]);
+        Assert.Equal(new StatusText.Tile("57", "of 210"), tiles[3]);
+        Assert.Equal(new StatusText.Tile("1h 23m", "Fri 00:23"), tiles[4]); // tomorrow: no room for "done"
+    }
+
+    [Fact]
+    public void StatsTilesFallBackToZAndBlanks()
+    {
+        var printing = new PrinterStatus("printing", 0.1, Details: new PrintDetails(null, null, Z: 2.35));
+        Assert.Equal(new StatusText.Tile("2.4", "mm (Z)"), StatusText.StatsTiles(printing)[3]);
+
+        var idle = StatusText.StatsTiles(new PrinterStatus("standby", 0, Details: new PrintDetails(new Heater(23, 0), null)));
+        Assert.Equal(new StatusText.Tile("23°", "off"), idle[0]);
+        Assert.Equal(new StatusText.Tile("—", ""), idle[1]);
+        Assert.Equal(new StatusText.Tile("—", "Idle"), idle[2]);
+        Assert.Equal(new StatusText.Tile("—", ""), idle[3]);
+        Assert.Equal(new StatusText.Tile("—", ""), idle[4]);
+    }
+
+    [Theory]
+    [InlineData(1040, 480, false)]  // default popup
+    [InlineData(1920, 1040, false)] // maximized on a 1080p screen
+    [InlineData(1280, 1392, true)]  // snapped to half of a 4K screen
+    [InlineData(500, 900, true)]    // tall and thin
+    public void ConsoleGoesBelowTheVideoInTallWindows(double width, double height, bool stacked)
+    {
+        var (isStacked, videoHeight) = WebcamPopup.ChooseArrangement(width, height, 16.0 / 9);
+        Assert.Equal(stacked, isStacked);
+        if (stacked)
+            Assert.Equal(Math.Min(width * 9 / 16, height - 220), videoHeight, 3);
+    }
+
+    [Fact]
     public void ShortenKeepsTheEnd() => Assert.Equal("\u2026def", StatusText.Shorten("abcdef", 4));
 
     [Theory]
@@ -96,6 +136,45 @@ public class MoonrakerTests
         Assert.Equal(0.25, status.Progress);
         Assert.Equal(1800, status.TimeLeftSeconds);
         Assert.Equal("Slicer", status.EtaSource);
+    }
+
+    [Fact]
+    public async Task ReadsTemperaturesAndLayers()
+    {
+        var http = Stub(path => path switch
+        {
+            var p when p.StartsWith("/printer/objects/query") => """
+                {"result":{"status":{"print_stats":{"state":"printing","filename":"a.gcode","print_duration":60,
+                   "info":{"current_layer":12,"total_layer":80}},
+                 "extruder":{"temperature":214.8,"target":215},"heater_bed":{"temperature":60.1,"target":60},
+                 "gcode_move":{"gcode_position":[1,2,2.6,0]}}}}
+                """,
+            var p when p.StartsWith("/server/files/metadata") => """{"result":{}}""",
+            _ => null,
+        });
+        var details = (await new MoonrakerBackend("p", http: http).GetStatusAsync(default)).Details!;
+        Assert.Equal(new PrintDetails(new Heater(214.8, 215), new Heater(60.1, 60), 12, 80, 2.6), details);
+    }
+
+    [Fact]
+    public async Task WorksOutLayersFromZWhenKlipperDoesNotKnow()
+    {
+        // No SET_PRINT_STATS_INFO from the slicer: info fields are null.
+        var http = Stub(path => path switch
+        {
+            var p when p.StartsWith("/printer/objects/query") => """
+                {"result":{"status":{"print_stats":{"state":"printing","filename":"a.gcode",
+                   "info":{"current_layer":null,"total_layer":null}},
+                 "extruder":{"temperature":215,"target":215},"gcode_move":{"gcode_position":[0,0,1.0,0]}}}}
+                """,
+            var p when p.StartsWith("/server/files/metadata") =>
+                """{"result":{"layer_height":0.2,"first_layer_height":0.2,"object_height":20}}""",
+            _ => null,
+        });
+        var details = (await new MoonrakerBackend("p", http: http).GetStatusAsync(default)).Details!;
+        Assert.Equal(5, details.Layer);
+        Assert.Equal(100, details.TotalLayers);
+        Assert.Null(details.Bed);
     }
 
     [Fact]

@@ -31,6 +31,9 @@ public sealed class TrayController : IDisposable
     private PrinterStatus _lastOnline = PrinterStatus.Connecting;
     private (string State, double Progress)? _lastDrawn;
     private DateTime? _configTime;
+    // Released to check the printer right away (the popup's stats strip just opened).
+    private readonly SemaphoreSlim _statusWake = new(0);
+    private static readonly TimeSpan StatsInterval = TimeSpan.FromSeconds(1);
 
     public TrayController(AppConfig config)
     {
@@ -159,6 +162,12 @@ public sealed class TrayController : IDisposable
         _popup = _backend.SupportsWebcam
             ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole, _config.ConsoleHideTimelapse)
             : null;
+        if (_popup is { HasStats: true } popup)
+            popup.IsVisibleChanged += (_, _) =>
+            {
+                if (popup.IsVisible && _statusWake.CurrentCount == 0)
+                    _statusWake.Release();
+            };
     }
 
     /// <summary>Switch to new settings without restarting (UI thread).</summary>
@@ -203,14 +212,18 @@ public sealed class TrayController : IDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception e) { status = PrinterStatus.Offline(backend.DescribeError(e)); }
 
+            bool statsShown = false;
             await _ui.InvokeAsync(() =>
             {
+                statsShown = _popup is { HasStats: true, IsVisible: true };
                 if (backend != _backend)
                     return; // settings changed while we were asking the old printer
                 Apply(status);
             });
 
-            try { await Task.Delay(_config.UpdateInterval, ct); }
+            // Faster while the stats strip is on screen.
+            var delay = statsShown && StatsInterval < _config.UpdateInterval ? StatsInterval : _config.UpdateInterval;
+            try { await _statusWake.WaitAsync(delay, ct); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -219,6 +232,7 @@ public sealed class TrayController : IDisposable
     private void Apply(PrinterStatus status)
     {
         _status = status;
+        _popup?.ShowStatus(status);
         if (status.State != "offline")
         {
             Notify(_lastOnline, status);

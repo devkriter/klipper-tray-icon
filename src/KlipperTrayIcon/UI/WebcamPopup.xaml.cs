@@ -38,6 +38,10 @@ public partial class WebcamPopup : Window
     private BitmapSource? _cached;
     private DateTime _cachedAt;
     private DateTime _hiddenAt;
+    private DateTime _deactivatedAt;
+    // Pinned: stays open, can sit behind other windows and remembers where
+    // you put it, like a normal app. For this run of the app only.
+    private bool _pinned;
     private bool _isShutdown;
     // Newest frame waiting for the UI thread (latest wins, so a slow UI never
     // builds up a backlog of frames): a decoded JPEG, or raw pixels to copy
@@ -53,16 +57,26 @@ public partial class WebcamPopup : Window
         _backend = backend;
         _showConsole = showConsole;
 
-        Width = VideoWidth + 2 + (showConsole ? ConsoleWidth : 0);
-        Height = PopupHeight;
+        ResetSize();
+        MinWidth = VideoWidth / 2 + 2;
+        MinHeight = PopupHeight / 2;
         if (showConsole)
         {
-            ConsoleColumn.Width = new GridLength(ConsoleWidth);
             ConsolePanel.Visibility = Visibility.Visible;
+            Layout.SizeChanged += (_, _) => UpdateArrangement();
+            UpdateArrangement();
             _console = new ConsoleFeed(backend, hideTimelapse, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+            ShowStatus(PrinterStatus.Connecting);
         }
 
-        Deactivated += (_, _) => HideFromFocusLoss();
+        Deactivated += (_, _) =>
+        {
+            _deactivatedAt = DateTime.UtcNow;
+            HideFromFocusLoss();
+        };
+        StateChanged += (_, _) => FitMaximized();
+        // handledEventsToo: the console's ScrollViewer marks clicks handled.
+        AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnDragAnywhere), handledEventsToo: true);
         KeyDown += (_, e) => { if (e.Key == Key.Escape) HidePopup(); };
         // Make the native window now, and render it once off-screen, so the
         // first real show doesn't pay for window creation or first-render setup.
@@ -87,7 +101,11 @@ public partial class WebcamPopup : Window
 
     public void Toggle()
     {
-        if (IsVisible)
+        // Pinned and behind other windows: bring it forward rather than closing it.
+        // (A tray click takes focus first, so "was it in front" means it lost focus just now.)
+        if (IsVisible && _pinned && DateTime.UtcNow - _deactivatedAt > ToggleWindow)
+            ShowAtCursor();
+        else if (IsVisible)
             HidePopup();
         else if (DateTime.UtcNow - _hiddenAt > ToggleWindow)
             ShowAtCursor();
@@ -103,7 +121,13 @@ public partial class WebcamPopup : Window
             Activate();
             return;
         }
-        PositionNearCursor();
+        if (!_pinned)
+        {
+            // Unpinned it's a popup again: default size, by the tray.
+            WindowState = WindowState.Normal;
+            ResetSize();
+            PositionNearCursor();
+        }
 
         // Paint the cached frame before the window appears, so the very first
         // thing on screen is a picture rather than "Connecting...".
@@ -142,8 +166,64 @@ public partial class WebcamPopup : Window
 
     private void HideFromFocusLoss()
     {
-        if (IsVisible)
+        if (IsVisible && !_pinned)
             HidePopup();
+    }
+
+    private void ResetSize()
+    {
+        Width = VideoWidth + 2 + (_showConsole ? ConsoleWidth : 0);
+        Height = PopupHeight;
+    }
+
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        _pinned = !_pinned;
+        // Pinned it's a normal window: other windows can cover it, and it has a
+        // taskbar button so you can get back to it.
+        Topmost = !_pinned;
+        ShowInTaskbar = _pinned;
+        PinButton.Content = _pinned ? "" : ""; // filled pin / pin
+        PinButton.Foreground = _pinned ? PinnedBrush : Brushes.White;
+        PinButton.ToolTip = _pinned ? "Unpin: close when you click elsewhere" : "Pin: keep open when you click elsewhere";
+        Activate();
+    }
+
+    private static readonly Brush PinnedBrush = Frozen(Color.FromRgb(0x60, 0xCD, 0xFF));
+
+    /// <summary>Nothing in the popup takes clicks except its buttons, so it drags from anywhere.</summary>
+    private void OnDragAnywhere(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState != MouseButtonState.Pressed || IsInButton(e.OriginalSource as DependencyObject))
+            return;
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            return;
+        }
+        try { DragMove(); } // the native move loop: dragging to a screen edge snaps
+        catch (InvalidOperationException) { }
+    }
+
+    private static bool IsInButton(DependencyObject? element)
+    {
+        for (; element != null; element = element is Visual or System.Windows.Media.Media3D.Visual3D
+                                     ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element))
+            if (element is System.Windows.Controls.Primitives.ButtonBase)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// A maximized window without a title bar overhangs the screen by its
+    /// resize border; pad it back in so nothing is cut off.
+    /// </summary>
+    private void FitMaximized()
+    {
+        var border = SystemParameters.WindowResizeBorderThickness;
+        Frame.Margin = WindowState == WindowState.Maximized
+            ? new Thickness(border.Left + 4, border.Top + 4, border.Right + 4, border.Bottom + 4)
+            : new Thickness(0);
     }
 
     private void HidePopup()
@@ -167,6 +247,71 @@ public partial class WebcamPopup : Window
         EndSession();
         _lifetime.Cancel();
         Close();
+    }
+
+    // ---- console placement ----------------------------------------------------------
+
+    private const double MinStackedConsoleHeight = 220;
+
+    /// <summary>
+    /// Console beside the video or below it: whichever leaves the video
+    /// bigger. Below, the video gets its natural height and the console the rest.
+    /// </summary>
+    internal static (bool Stacked, double VideoHeight) ChooseArrangement(double width, double height, double aspect)
+    {
+        double beside = Math.Min(Math.Max(0, width - ConsoleWidth) / aspect, height);
+        double below = Math.Min(width / aspect, height - MinStackedConsoleHeight);
+        return below > beside ? (true, Math.Max(0, below)) : (false, 0);
+    }
+
+    private void UpdateArrangement()
+    {
+        if (!_showConsole || Layout.ActualWidth <= 0)
+            return;
+        double aspect = VideoImage.Source is BitmapSource { PixelHeight: > 0 } src
+            ? (double)src.PixelWidth / src.PixelHeight
+            : 16.0 / 9;
+        var (stacked, videoHeight) = ChooseArrangement(Layout.ActualWidth, Layout.ActualHeight, aspect);
+        System.Windows.Controls.Grid.SetColumn(ConsolePanel, stacked ? 0 : 1);
+        System.Windows.Controls.Grid.SetRow(ConsolePanel, stacked ? 1 : 0);
+        ConsoleColumn.Width = new GridLength(stacked ? 0 : ConsoleWidth);
+        VideoRow.Height = stacked ? new GridLength(videoHeight) : new GridLength(1, GridUnitType.Star);
+        ConsoleRow.Height = stacked ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        ConsolePanel.BorderThickness = stacked ? new Thickness(0, 1, 0, 0) : new Thickness(1, 0, 0, 0);
+        // Beside the video, the strip leaves room for the pin and close buttons above it.
+        StatsList.Margin = new Thickness(6, 8, stacked ? 6 : 62, 9);
+    }
+
+    // ---- stats strip ---------------------------------------------------------------
+
+    private static readonly string[] StatLabels = ["NOZZLE", "BED", "PROGRESS", "LAYER", "TIME LEFT"];
+
+    /// <summary>True when the popup shows the stats strip (it comes with the console).</summary>
+    public bool HasStats => _showConsole;
+
+    /// <summary>Latest printer status, for the stats strip above the console (UI thread).</summary>
+    public void ShowStatus(PrinterStatus status)
+    {
+        if (!_showConsole)
+            return;
+        var tiles = StatusText.StatsTiles(status);
+        var items = new StatTile[tiles.Length];
+        for (int i = 0; i < tiles.Length; i++)
+            items[i] = new StatTile(StatLabels[i], tiles[i].Value, tiles[i].Detail,
+                                    tiles[i].Highlight ? ConsoleLine.TemperatureBrush : ConsoleLine.ResponseBrush);
+        StatsList.ItemsSource = items;
+        bool showProgress = status.State is "printing" or "paused" or "complete";
+        ProgressScale.ScaleX = showProgress ? Math.Clamp(status.Progress, 0, 1) : 0;
+        ProgressBar.Fill = status.State == "paused" ? ConsoleLine.TemperatureBrush : ProgressFill;
+    }
+
+    private static readonly Brush ProgressFill = Frozen(Color.FromRgb(0x3F, 0xB9, 0x50));
+
+    private static Brush Frozen(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 
     // ---- video -----------------------------------------------------------------
@@ -341,7 +486,11 @@ public partial class WebcamPopup : Window
 
     private void SetImage(BitmapSource image)
     {
+        bool newShape = VideoImage.Source is not BitmapSource old
+                        || old.PixelWidth * image.PixelHeight != image.PixelWidth * old.PixelHeight;
         VideoImage.Source = image;
+        if (newShape)
+            UpdateArrangement();
         Placeholder.Visibility = Visibility.Collapsed;
     }
 
@@ -352,6 +501,9 @@ public partial class WebcamPopup : Window
     }
 }
 
+/// <summary>One tile of the stats strip.</summary>
+public sealed record StatTile(string Label, string Value, string Detail, Brush Brush);
+
 /// <summary>One row in the console panel.</summary>
 public sealed class ConsoleLine
 {
@@ -361,6 +513,9 @@ public sealed class ConsoleLine
     private static readonly Brush Response = Frozen("#ECECEC"), Command = Frozen("#82AEE0"),
                                   Error = Frozen("#FF7B72"), Temperature = Frozen("#E3B341"), Status = Frozen("#A0A0A0");
     private static readonly FontFamily Mono = new("Cascadia Mono, Consolas"), Ui = new("Segoe UI");
+
+    internal static Brush ResponseBrush => Response;
+    internal static Brush TemperatureBrush => Temperature;
 
     public string Time { get; private init; } = "";
     public string Text { get; private init; } = "";

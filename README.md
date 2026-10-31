@@ -16,7 +16,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
 - **Status at a glance**: hover or right-click the icon to see progress, time left, ETA and the
   file being printed.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
-  video. It can be turned off in Settings.
+  video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
+  can be turned off in Settings.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Settings window**: switch printers, test the connection, change the refresh rate, and turn
   notifications and *Start with Windows* on or off. Changes apply immediately.
@@ -28,6 +29,9 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   *Test connection* button.
 - **Instant webcam popup**: left-click the tray icon. A recent snapshot appears immediately while
   the live stream connects.
+- **Pin it as a window**: the pin button keeps the popup open like a normal window. Drag it from
+  anywhere, resize it, or snap it to the side of the screen; in tall windows the console moves
+  below the video.
 - **Native Windows app**: built with C# / .NET and the Windows 11 look, follows light/dark mode.
 - **Portable**: Unzip and run - no installation, nothing else to install (the .NET runtime is
   included).

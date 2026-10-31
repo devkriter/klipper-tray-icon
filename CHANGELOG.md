@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.0] - 2026-10-31
+### Added
+- **Stats strip** above the Klipper console: nozzle and bed temperature (current and target;
+  amber while still heating), progress with a bar, layer (from Klipper, else worked out from Z and
+  the file's layer heights, else Z in mm) and time left with the finish time. While the popup is
+  open the printer is checked every second.
+- **Pin button** next to the close button: a pinned popup stays open when you click elsewhere,
+  isn't always on top, gets a taskbar button and keeps its position and size. A tray click brings
+  it forward if it's behind other windows.
+- The popup can be **dragged from anywhere** and **resized**, and works with Windows snapping
+  (screen edges, Win+arrows, Snap Layouts). Double-click maximizes.
+- In tall windows (e.g. snapped to half a screen) the console **moves below the video**,
+  whichever arrangement leaves the video bigger.
+
 ## [2.0.1] - 2026-10-30
 ### Added
 - Console option **"Hide the commands timelapse sends on every frame"** (Settings, under the

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.1.1] - 2026-10-31
+### Fixed
+- Live video no longer freezes when the popup stays open for a long time. A camera stream that
+  goes quiet for 10 seconds or ends is reconnected automatically (after 1 s, backing off to 10 s),
+  with a "reconnecting" badge over the last frame meanwhile. Applies to Klipper and Bambu.
+
 ## [2.1.0] - 2026-10-31
 ### Added
 - **Stats strip** above the Klipper console: nozzle and bed temperature (current and target;

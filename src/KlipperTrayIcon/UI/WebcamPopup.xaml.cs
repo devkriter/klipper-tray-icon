@@ -23,6 +23,8 @@ public partial class WebcamPopup : Window
 {
     private const double VideoWidth = 640, ConsoleWidth = 400, PopupHeight = 482;
     private static readonly TimeSpan SnapshotRefresh = TimeSpan.FromSeconds(20);
+    // No frame for this long while open: the stream has stalled, so reconnect.
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(10);
     // A tray click while the popup is open first takes focus away (hiding
     // it), then arrives as a click. Treat that pair as "toggle closed".
     private static readonly TimeSpan ToggleWindow = TimeSpan.FromMilliseconds(400);
@@ -336,16 +338,44 @@ public partial class WebcamPopup : Window
         _session = null;
     }
 
+    /// <summary>
+    /// Keeps the live video going while the popup is open: a stream that ends
+    /// or goes quiet (Wi-Fi drop, camera service restart) is reconnected.
+    /// </summary>
     private async Task StreamAsync(int id, CancellationToken ct)
     {
+        bool everLive = false;
+        for (int attempt = 0; !ct.IsCancellationRequested; attempt++)
+        {
+            bool gotFrame = await StreamOnceAsync(id, ct).ConfigureAwait(false);
+            if (ct.IsCancellationRequested)
+                break;
+            everLive |= gotFrame;
+            if (gotFrame)
+                attempt = 0;
+            Post(id, everLive ? "reconnecting" : "unavailable", null);
+            try { await Task.Delay(RetryDelay(attempt), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    internal static TimeSpan RetryDelay(int attempt) => TimeSpan.FromSeconds(Math.Min(10, 1 << Math.Min(attempt, 4)));
+
+    /// <summary>One connection to the camera, until it ends or stalls. True if it showed any frames.</summary>
+    private async Task<bool> StreamOnceAsync(int id, CancellationToken ct)
+    {
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
         bool gotFrame = false;
+        // Reset on every frame; fires (ending this connection) if they stop coming.
+        attempt.CancelAfter(StallTimeout);
         try
         {
-            await foreach (var frame in _backend.GetWebcamFramesAsync(ct).ConfigureAwait(false))
+            await foreach (var frame in _backend.GetWebcamFramesAsync(attempt.Token).ConfigureAwait(false))
             {
                 if (frame is PixelFrame pixels)
                 {
                     gotFrame = true;
+                    attempt.CancelAfter(StallTimeout);
                     Post(id, "live", null, pixels);
                     continue;
                 }
@@ -354,12 +384,12 @@ public partial class WebcamPopup : Window
                 if (image == null)
                     continue;
                 gotFrame = true;
+                attempt.CancelAfter(StallTimeout);
                 Post(id, "live", image);
             }
         }
         catch (Exception) { }
-        if (!gotFrame && !ct.IsCancellationRequested)
-            Post(id, "unavailable", null);
+        return gotFrame;
     }
 
     private async Task QuickSnapshotAsync(int id, CancellationToken ct)
@@ -460,6 +490,9 @@ public partial class WebcamPopup : Window
                 (_cached, _cachedAt) = (image, DateTime.Now);
                 SetImage(image!);
                 SetBadge("Snapshot · connecting to live video…");
+                break;
+            case "reconnecting":
+                SetBadge("Live video stopped · reconnecting…");
                 break;
             case "unavailable":
                 if (_cached != null)

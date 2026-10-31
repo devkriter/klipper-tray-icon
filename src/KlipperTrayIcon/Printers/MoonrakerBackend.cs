@@ -49,6 +49,11 @@ public sealed class MoonrakerBackend : IPrinterBackend
     public bool SupportsConsole => true;
     public string? DashboardUrl => BaseUrl;
 
+    /// <summary>The address's host until the printer has told us its hostname.</summary>
+    public string DisplayName => _hostname ?? (Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) ? uri.Host : BaseUrl);
+    private volatile string? _hostname;
+    private bool _askedHostname;
+
     /// <summary>Accepts what people actually type ("mainsail.local", "192.168.1.5/").</summary>
     public static string NormalizeUrl(string? url)
     {
@@ -150,6 +155,18 @@ public sealed class MoonrakerBackend : IPrinterBackend
                     timeLeft = printDuration / progress - printDuration;
                     etaSource = "Calc";
                 }
+            }
+            if (!_askedHostname)
+            {
+                _askedHostname = true;
+                try
+                {
+                    using var info = await GetJsonAsync("/printer/info", TimeSpan.FromSeconds(2), ct);
+                    string hostname = info.RootElement.Prop("result").Str("hostname");
+                    if (hostname.Length > 0)
+                        _hostname = hostname;
+                }
+                catch (Exception) when (!ct.IsCancellationRequested) { } // keep showing the address
             }
             return new PrinterStatus(state, progress, filename, timeLeft, etaSource,
                                      Details: ReadDetails(status, state, _fileInfo));

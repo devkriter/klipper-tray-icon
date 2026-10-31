@@ -1,14 +1,20 @@
 # Changelog
 
-## [Unreleased]
+## [2.2.0] - 2026-10-31
 ### Added
 - **Camera picker** (Settings, Klipper): choose which of the printer's webcams the popup shows.
   The list is read from Moonraker once the printer has been reached (on opening Settings, and
   after *Test connection*). Config key: `webcam_name` (empty: the first camera, as before).
-- **Second view** (Settings, Klipper): a second webcam the popup can switch to with a new button
-  next to the pin, e.g. the printer's touchscreen. Config key: `second_view_name`.
+- **Second view** (Settings, Klipper): a second webcam the popup can switch to with a button
+  in the title bar, e.g. the printer's touchscreen. Config key: `second_view_name`.
 - **Clickable remote touchscreens**: on a view that takes touches (the remote screen of paxx12's
   extended firmware for the Snapmaker U1), clicks and drags in the popup are sent to the printer.
+  **Touch starts locked** (view only): unlock it with the lock button in the title bar. While
+  unlocked, the picture has an amber outline. It locks again when the popup closes or the view
+  changes, and the click that brings the window forward is never sent to the printer.
+- **Title bar** on the webcam popup with the printer's name and state, and all its buttons (switch
+  view, touch lock, pin, close). Drag it to move the window; double-click to maximize. The stats
+  strip gets its full width back.
 - Cameras that aren't plain MJPEG (WebRTC, HLS, iframe) now work when the server also serves MJPEG
   next to them (camera-streamer, paxx12's firmware), and otherwise fall back to polling their
   snapshot about ten times a second. Before, only MJPEG webcams were found.

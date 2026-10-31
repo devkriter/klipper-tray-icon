@@ -17,7 +17,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   file being printed.
 - **Choose the camera, and a second view** (Klipper): pick any of the printer's webcams in
   Settings, plus a second one to switch to from the popup. Remote touchscreens (e.g. the Snapmaker
-  U1's with paxx12's extended firmware) can be clicked right in the popup.
+  U1's with paxx12's extended firmware) can be used right in the popup, once you unlock touch
+  with the lock button (it starts locked, so a stray click can't press anything).
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
   can be turned off in Settings.

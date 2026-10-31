@@ -12,17 +12,19 @@
         Background="Black"
         Height="482"
         Width="642">
-    <!-- No title bar, but keeps the native resize borders, so edge snapping
-         and Snap Layouts (Win+Z, Win+arrows) work like any other window. -->
+    <!-- Our own slim title bar (the top 28 px act as Windows' caption: drag,
+         double-click to maximize, snapping), with the native resize borders. -->
     <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="0" GlassFrameThickness="0" ResizeBorderThickness="6"
+        <WindowChrome CaptionHeight="28" GlassFrameThickness="0" ResizeBorderThickness="6"
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <Style x:Key="CloseButton" TargetType="Button">
             <Setter Property="Foreground" Value="White" />
-            <Setter Property="Background" Value="#202020" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Width" Value="40" />
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -59,6 +61,29 @@
     </Window.Resources>
 
     <Border x:Name="Frame" BorderBrush="#404040" BorderThickness="1">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Height="28" Background="#1C1C1C" BorderBrush="#333333" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <!-- Switches to the second view (picked in Settings) and back. -->
+                    <Button x:Name="ViewButton" FontSize="13" Visibility="Collapsed"
+                            Style="{StaticResource PinButton}" Click="OnViewClick" />
+                    <!-- Only on a view that takes taps; locked (view-only) until clicked. -->
+                    <Button x:Name="TouchButton" FontSize="13" Visibility="Collapsed"
+                            Style="{StaticResource PinButton}" Click="OnTouchLockClick" />
+                    <Button x:Name="PinButton" Content="&#xE718;" FontSize="13"
+                            Style="{StaticResource PinButton}" Click="OnPinClick"
+                            ToolTip="Pin: keep open when you click elsewhere" />
+                    <Button Content="&#x2715;" FontSize="11"
+                            Style="{StaticResource CloseButton}" Click="OnCloseClick" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,8,0">
+                    <Ellipse x:Name="StateDot" Width="8" Height="8" Fill="#808080" Margin="0,1,8,0" />
+                    <TextBlock x:Name="TitleText" Foreground="#D8D8D8" FontSize="12" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
         <!-- Console beside the video, or below it in tall windows (see UpdateArrangement). -->
         <Grid x:Name="Layout">
             <Grid.ColumnDefinitions>
@@ -73,6 +98,15 @@
             <!-- Video -->
             <Grid Background="Black" ClipToBounds="True">
                 <Image x:Name="VideoImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                <!-- While touch is unlocked: clicks on the picture go to the printer. -->
+                <Border x:Name="TouchOutline" BorderBrush="#E3B341" BorderThickness="2" IsHitTestVisible="False"
+                        Visibility="Collapsed">
+                    <Border Background="#E3B341" CornerRadius="0,0,4,0" Padding="7,2" HorizontalAlignment="Left"
+                            VerticalAlignment="Top">
+                        <TextBlock Text="Touch on · clicks go to the printer" Foreground="#141414" FontSize="11"
+                                   FontWeight="SemiBold" />
+                    </Border>
+                </Border>
                 <TextBlock x:Name="Placeholder" Text="Connecting..." Foreground="White" FontSize="13"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                 <!-- Shown over a snapshot until live video takes over. -->
@@ -146,17 +180,7 @@
                 </DockPanel>
             </Border>
 
-            <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal"
-                        HorizontalAlignment="Right" VerticalAlignment="Top">
-                <!-- Switches to the second view (picked in Settings) and back. -->
-                <Button x:Name="ViewButton" FontSize="12" Width="28" Height="24" Visibility="Collapsed"
-                        Style="{StaticResource PinButton}" Click="OnViewClick" />
-                <Button x:Name="PinButton" Content="&#xE718;" FontSize="12" Width="28" Height="24"
-                        Style="{StaticResource PinButton}" Click="OnPinClick"
-                        ToolTip="Pin: keep open when you click elsewhere" />
-                <Button Content="&#x2715;" FontSize="11" Width="28" Height="24"
-                        Style="{StaticResource CloseButton}" Click="OnCloseClick" />
-            </StackPanel>
         </Grid>
+      </DockPanel>
     </Border>
 </Window>

@@ -47,8 +47,12 @@ public partial class WebcamPopup : Window
     private readonly BitmapSource?[] _cached = new BitmapSource?[2];
     private readonly DateTime[] _cachedAt = new DateTime[2];
     // The view on screen takes clicks, which go to the printer as taps.
+    // Touch starts locked (view only) and locks again when the popup hides or
+    // the view changes, so a stray click can't press anything on the printer.
     private bool _touchable;
+    private bool _touchUnlocked;
     private bool _touching;
+    private long _activatedAt;
     private readonly Channel<(CameraView View, TouchAction Action, int X, int Y)> _touches =
         Channel.CreateUnbounded<(CameraView, TouchAction, int, int)>(new UnboundedChannelOptions { SingleReader = true });
     private DateTime _hiddenAt;
@@ -94,6 +98,7 @@ public partial class WebcamPopup : Window
         VideoImage.LostMouseCapture += (_, _) => EndTouch();
         _ = Task.Run(() => TouchLoopAsync(_lifetime.Token));
 
+        Activated += (_, _) => _activatedAt = Environment.TickCount64;
         Deactivated += (_, _) =>
         {
             _deactivatedAt = DateTime.UtcNow;
@@ -245,7 +250,7 @@ public partial class WebcamPopup : Window
     {
         if (e.ButtonState != MouseButtonState.Pressed || IsInButton(e.OriginalSource as DependencyObject))
             return;
-        if (_touchable && e.OriginalSource == VideoImage)
+        if (TouchActive && e.OriginalSource == VideoImage)
             return; // a tap on the printer's screen, not a drag
         if (e.ClickCount == 2)
         {
@@ -282,6 +287,7 @@ public partial class WebcamPopup : Window
         if (!IsVisible)
             return;
         EndTouch();
+        LockTouch();
         _hiddenAt = DateTime.UtcNow;
         Hide();
         _console?.Pause();
@@ -330,8 +336,7 @@ public partial class WebcamPopup : Window
         VideoRow.Height = stacked ? new GridLength(videoHeight) : new GridLength(1, GridUnitType.Star);
         ConsoleRow.Height = stacked ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ConsolePanel.BorderThickness = stacked ? new Thickness(0, 1, 0, 0) : new Thickness(1, 0, 0, 0);
-        // Beside the video, the strip leaves room for the buttons above it.
-        StatsList.Margin = new Thickness(6, 8, stacked ? 6 : 28 * (_backend.SecondViewName != null ? 3 : 2) + 6, 9);
+        StatsList.Margin = new Thickness(6, 8, 6, 9);
     }
 
     // ---- stats strip ---------------------------------------------------------------
@@ -344,6 +349,11 @@ public partial class WebcamPopup : Window
     /// <summary>Latest printer status, for the stats strip above the console (UI thread).</summary>
     public void ShowStatus(PrinterStatus status)
     {
+        // Title bar: printer and what it's doing, e.g. "voron · Printing · 42%".
+        string headline = StatusText.Lines(status)[0];
+        TitleText.Text = $"{_backend.DisplayName} · {headline}";
+        Title = TitleText.Text; // the taskbar button, when pinned
+        StateDot.Fill = StateBrush(status.State);
         if (!_showConsole)
             return;
         var tiles = StatusText.StatsTiles(status);
@@ -358,6 +368,18 @@ public partial class WebcamPopup : Window
     }
 
     private static readonly Brush ProgressFill = Frozen(Color.FromRgb(0x3F, 0xB9, 0x50));
+    private static readonly Brush ErrorDot = Frozen(Color.FromRgb(0xF8, 0x51, 0x49)),
+                                  DoneDot = Frozen(Color.FromRgb(0x58, 0xA6, 0xFF)),
+                                  IdleDot = Frozen(Color.FromRgb(0x80, 0x80, 0x80));
+
+    private static Brush StateBrush(string state) => state switch
+    {
+        "printing" => ProgressFill,
+        "paused" => ConsoleLine.TemperatureBrush,
+        "complete" => DoneDot,
+        "error" or "offline" or "cancelled" => ErrorDot,
+        _ => IdleDot,
+    };
 
     private static Brush Frozen(Color color)
     {
@@ -593,19 +615,56 @@ public partial class WebcamPopup : Window
 
     // ---- touch -----------------------------------------------------------------
 
+    /// <summary>Clicks on the picture go to the printer: the view takes taps and the user unlocked it.</summary>
+    private bool TouchActive => _touchable && _touchUnlocked;
+
     private void SetTouchable(bool touchable)
     {
         if (touchable == _touchable)
             return;
         if (!touchable)
+        {
             EndTouch();
+            _touchUnlocked = false;
+        }
         _touchable = touchable;
-        VideoImage.Cursor = touchable ? Cursors.Hand : null;
+        UpdateTouchUi();
+    }
+
+    private void OnTouchLockClick(object sender, RoutedEventArgs e)
+    {
+        _touchUnlocked = !_touchUnlocked;
+        if (!_touchUnlocked)
+            EndTouch();
+        UpdateTouchUi();
+    }
+
+    private void LockTouch()
+    {
+        if (!_touchUnlocked)
+            return;
+        _touchUnlocked = false;
+        UpdateTouchUi();
+    }
+
+    private void UpdateTouchUi()
+    {
+        TouchButton.Visibility = _touchable ? Visibility.Visible : Visibility.Collapsed;
+        TouchButton.Content = _touchUnlocked ? "" : ""; // touch pointer / lock
+        TouchButton.Foreground = _touchUnlocked ? ConsoleLine.TemperatureBrush : Brushes.White;
+        TouchButton.ToolTip = _touchUnlocked
+            ? "Touch on: clicks on the picture go to the printer. Click to lock."
+            : "Touch locked (view only). Click to use the printer's screen from here.";
+        TouchOutline.Visibility = TouchActive ? Visibility.Visible : Visibility.Collapsed;
+        VideoImage.Cursor = TouchActive ? Cursors.Hand : null;
     }
 
     private void OnTouchDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_touchable || TouchPoint(e) is not var (x, y))
+        if (!TouchActive || TouchPoint(e) is not var (x, y))
+            return;
+        // The click that brings the window forward is for the window, not the printer.
+        if (Environment.TickCount64 - _activatedAt < 250)
             return;
         _touching = true;
         VideoImage.CaptureMouse(); // keeps the drag going even outside the picture

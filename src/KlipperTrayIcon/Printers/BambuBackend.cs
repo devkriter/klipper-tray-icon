@@ -64,6 +64,7 @@ public sealed class BambuBackend : IPrinterBackend
     public bool SupportsWebcam => true;
     public bool SupportsConsole => false;
     public string? DashboardUrl => null;
+    public string DisplayName => "Bambu Lab";
     public string? SecondViewName => null;
 
     // ---- report parsing (community-documented schema; no official docs) ----

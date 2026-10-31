@@ -12,6 +12,8 @@ public interface IPrinterBackend : IDisposable
     bool SupportsConsole { get; }
     /// <summary>Web interface to open from the tray menu, if the printer has one.</summary>
     string? DashboardUrl { get; }
+    /// <summary>Short name for the popup's title bar (e.g. the printer's hostname).</summary>
+    string DisplayName { get; }
 
     void Start();
     Task<PrinterStatus> GetStatusAsync(CancellationToken ct);

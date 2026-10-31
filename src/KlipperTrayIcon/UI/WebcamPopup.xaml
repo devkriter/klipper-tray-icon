@@ -387,6 +387,9 @@
                                 <TextBlock Text="RECENT UPLOADS" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
                                            Margin="6,14,6,6" />
                                 <ItemsControl x:Name="RecentList" ItemTemplate="{StaticResource RecentRow}" />
+                                <Button x:Name="LoadMoreButton" Content="Load more" Style="{StaticResource RowButton}"
+                                        Width="Auto" Height="26" FontSize="12" Foreground="#8C8C8C" Margin="0,2,0,0"
+                                        Visibility="Collapsed" Click="OnLoadMoreClick" />
                             </StackPanel>
                         </ScrollViewer>
                     </DockPanel>

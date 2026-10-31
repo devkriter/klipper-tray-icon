@@ -139,6 +139,16 @@ public class PrintQueueTests
         Assert.Equal(expected, MoonrakerBackend.PickPreview(doc.RootElement));
     }
 
+    [Fact]
+    public void RecentUploadsLeaveOutQueuedFiles()
+    {
+        var recent = new[] { "A.gcode", "B.gcode", "C.gcode", "D.gcode" }.Select((p, i) => new GcodeFile(p, 100 - i)).ToList();
+        var status = new QueueStatus("paused", [new QueuedJob("1", "B.gcode")]);
+        Assert.Equal(["A.gcode", "C.gcode"], WebcamPopup.RecentToShow(recent, status, 2).Select(f => f.Path));
+        // Off the queue again, it's back.
+        Assert.Equal(["A.gcode", "B.gcode"], WebcamPopup.RecentToShow(recent, new QueueStatus("paused", []), 2).Select(f => f.Path));
+    }
+
     [Theory]
     [InlineData("Benchy.gcode", "Benchy")]
     [InlineData("parts/Clip_x4.GCODE", "Clip_x4")]

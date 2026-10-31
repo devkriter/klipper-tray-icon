@@ -176,6 +176,7 @@ public partial class WebcamPopup : Window
         Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
         _console?.Resume();
         _queueWake = true; // fresh queue on opening, not up to a refresh later
+        _recentCount = RecentCount; // and back to the few newest uploads
         StartSession();
     }
 

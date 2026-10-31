@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.7.2] - 2026-10-31
+### Changed
+- Print queue: recent uploads leave out files that are already queued. Adding one moves it up into
+  the queue at once; removing it from the queue brings it back.
+
+### Added
+- Print queue: *Load more* under the recent uploads shows five more at a time (back to five when
+  the popup reopens).
+
 ## [2.7.1] - 2026-10-31
 ### Added
 - Print queue: hover over a thumbnail for a larger preview (the slicer's biggest thumbnail), after

@@ -22,8 +22,9 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   press anything). See [Snapmaker U1 Support](#snapmaker-u1-support).
 - **Print queue** (Klipper, optional): a button in the popup's title bar swaps the console for
   the printer's print queue (Moonraker's job queue, as in Mainsail): thumbnails (hover one for a
-  larger preview), drag to reorder, ✕ to remove, ＋ to add one of the recent uploads, and a small
-  *Start next* button that asks for a second click. Off by default; turn it on in Settings.
+  larger preview), drag to reorder, ✕ to remove, ＋ to add one of the recent uploads (the ones not
+  queued yet, with *Load more* for older files), and a small *Start next* button that asks for a
+  second click. Off by default; turn it on in Settings.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
   can be turned off in Settings.

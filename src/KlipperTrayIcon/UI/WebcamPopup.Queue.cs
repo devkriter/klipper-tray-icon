@@ -21,17 +21,19 @@ public sealed record QueueRow(string Path, string Name, string Detail, ImageSour
 /// <summary>
 /// The print queue panel, which takes the console's place when its title-bar
 /// button is pressed: queued jobs (drag to reorder, ✕ to remove), recent
-/// uploads (＋ to add) and a start button that needs a second click to confirm.
+/// uploads that aren't queued (＋ to add, "Load more" for older ones) and a
+/// start button that needs a second click to confirm.
 /// </summary>
 public partial class WebcamPopup
 {
-    private const int RecentCount = 5;
+    private const int RecentCount = 5; // recent uploads shown at first, and added by each "Load more"
     private static readonly TimeSpan QueueRefresh = TimeSpan.FromSeconds(2), FilesRefresh = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StartConfirmTime = TimeSpan.FromSeconds(4);
 
     private IPrintQueue? _queue;
     private bool _queueShown; // the panel shows the queue rather than the console
     private volatile bool _queueWake = true;
+    private volatile int _recentCount = RecentCount;
     private readonly ObservableCollection<QueueRow> _queueRows = new();
     private readonly ObservableCollection<QueueRow> _recentRows = new();
     private QueueStatus? _queueStatus;
@@ -94,12 +96,16 @@ public partial class WebcamPopup
                 var status = await _queue!.GetQueueAsync(ct).ConfigureAwait(false);
                 if (woken || !filesKnown || sinceFiles.Elapsed >= FilesRefresh)
                 {
-                    recent = await _queue.GetRecentFilesAsync(RecentCount, ct).ConfigureAwait(false);
+                    // Queued files are left out of the list, so ask for enough to fill it anyway, and one
+                    // more to know whether "Load more" has anything to load.
+                    recent = await _queue.GetRecentFilesAsync(_recentCount + status.Jobs.Count + 1, ct).ConfigureAwait(false);
                     filesKnown = true;
                     sinceFiles.Restart();
                 }
                 var details = new Dictionary<string, GcodeDetails>();
-                foreach (string path in status.Jobs.Select(j => j.Path).Concat(recent.Select(f => f.Path)).Distinct())
+                var paths = status.Jobs.Select(j => j.Path)
+                    .Concat(RecentToShow(recent, status, _recentCount).Select(f => f.Path));
+                foreach (string path in paths.Distinct())
                 {
                     try { details[path] = await _queue.GetFileDetailsAsync(path, ct).ConfigureAwait(false); }
                     catch (Exception) when (!ct.IsCancellationRequested) { details[path] = new GcodeDetails(null, null); }
@@ -128,16 +134,30 @@ public partial class WebcamPopup
                                     Image(j.Path, d?.Thumbnail), Image(j.Path + "#preview", d?.Preview), j.JobId);
             }));
         }
-        Replace(_recentRows, recent.Select(f =>
+        var shown = RecentToShow(recent, status, _recentCount);
+        Replace(_recentRows, shown.Select(f =>
         {
             var d = details.GetValueOrDefault(f.Path);
             string age = Ago(DateTimeOffset.FromUnixTimeMilliseconds((long)(f.Modified * 1000)));
             string detail = d?.EstimatedSeconds is double t ? $"{StatusText.FormatDuration(t)} · {age}" : age;
             return new QueueRow(f.Path, DisplayName(f.Path), detail, Image(f.Path, d?.Thumbnail), Image(f.Path + "#preview", d?.Preview));
         }));
+        LoadMoreButton.Visibility = recent.Count(f => !IsQueued(f, status)) > shown.Count ? Visibility.Visible : Visibility.Collapsed;
         QueueEmpty.Visibility = status.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         QueueHeader.Text = status.Jobs.Count switch { 0 => "QUEUE", 1 => "QUEUE · 1 job", var n => $"QUEUE · {n} jobs" };
         UpdateStartButton();
+    }
+
+    /// <summary>The newest uploads that aren't in the queue (removing one from the queue brings it back).</summary>
+    internal static List<GcodeFile> RecentToShow(IReadOnlyList<GcodeFile> recent, QueueStatus status, int count) =>
+        recent.Where(f => !IsQueued(f, status)).Take(count).ToList();
+
+    private static bool IsQueued(GcodeFile file, QueueStatus status) => status.Jobs.Any(j => j.Path == file.Path);
+
+    private void OnLoadMoreClick(object sender, RoutedEventArgs e)
+    {
+        _recentCount += RecentCount;
+        _queueWake = true;
     }
 
     /// <summary>Updates a list only if it changed, so it doesn't flicker every refresh.</summary>
@@ -266,7 +286,10 @@ public partial class WebcamPopup
     private async void OnQueueAddClick(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is QueueRow row)
+        {
+            _recentRows.Remove(row); // at once; the next refresh shows it in the queue
             await QueueActionAsync(q => q.AddToQueueAsync(row.Path, _lifetime.Token), "Couldn't add it");
+        }
     }
 
     private async void OnQueueRemoveClick(object sender, RoutedEventArgs e)

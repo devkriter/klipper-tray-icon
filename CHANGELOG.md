@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- **Camera picker** (Settings, Klipper): choose which of the printer's webcams the popup shows.
+  The list is read from Moonraker once the printer has been reached (on opening Settings, and
+  after *Test connection*). Config key: `webcam_name` (empty: the first camera, as before).
+- **Second view** (Settings, Klipper): a second webcam the popup can switch to with a new button
+  next to the pin, e.g. the printer's touchscreen. Config key: `second_view_name`.
+- **Clickable remote touchscreens**: on a view that takes touches (the remote screen of paxx12's
+  extended firmware for the Snapmaker U1), clicks and drags in the popup are sent to the printer.
+- Cameras that aren't plain MJPEG (WebRTC, HLS, iframe) now work when the server also serves MJPEG
+  next to them (camera-streamer, paxx12's firmware), and otherwise fall back to polling their
+  snapshot about ten times a second. Before, only MJPEG webcams were found.
+
+### Fixed
+- A camera that hangs up every few seconds (the Snapmaker U1's full-rate MJPEG) is reconnected
+  straight away, without flashing the "reconnecting" badge.
+
 ## [2.1.1] - 2026-10-31
 ### Fixed
 - Live video no longer freezes when the popup stays open for a long time. A camera stream that

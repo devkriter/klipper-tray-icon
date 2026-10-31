@@ -15,6 +15,9 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   - ⚪ **Gray Ring with red dot**: Offline (can't reach the printer — hover or right-click for why)
 - **Status at a glance**: hover or right-click the icon to see progress, time left, ETA and the
   file being printed.
+- **Choose the camera, and a second view** (Klipper): pick any of the printer's webcams in
+  Settings, plus a second one to switch to from the popup. Remote touchscreens (e.g. the Snapmaker
+  U1's with paxx12's extended firmware) can be clicked right in the popup.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
   can be turned off in Settings.
@@ -122,6 +125,8 @@ For Klipper/Moonraker (see `config.example.json`):
     "moonraker_api_key": "",
     "webcam_console": true,
     "console_hide_timelapse": true,
+    "webcam_name": "",
+    "second_view_name": "",
     "update_interval_seconds": 2,
     "notifications": true
 }
@@ -138,6 +143,13 @@ For Bambu Lab (see `config.example.bambu.json`):
     "notifications": true
 }
 ```
+
+`webcam_name` picks which of Moonraker's webcams to show (empty: the first one), and
+`second_view_name` adds a second one the popup can switch to — both are easiest to set from the
+lists in Settings. Webcams that use WebRTC or an iframe work too if the printer also serves MJPEG
+or a snapshot for them. On a Snapmaker U1 with paxx12's extended firmware, set the camera to
+`case` (or leave it automatic) and the second view to `gui` (Remote Screen must be on in
+`/firmware-config`): the printer's touchscreen then shows in the popup, and you can click on it.
 
 `console_hide_timelapse` hides the commands moonraker-timelapse sends on every frame from the
 console (Klipper's responses always show).

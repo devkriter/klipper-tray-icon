@@ -27,6 +27,9 @@ public sealed class AppConfig
     [JsonPropertyName("webcam_name")] public string WebcamName { get; set; } = "";
     /// <summary>Webcam the popup can switch to (e.g. a remote touchscreen); empty for none.</summary>
     [JsonPropertyName("second_view_name")] public string SecondViewName { get; set; } = "";
+    /// <summary>How to fetch each: "h264", "mjpeg" or "snapshots"; empty picks the best one the camera offers.</summary>
+    [JsonPropertyName("webcam_stream")] public string WebcamStream { get; set; } = "";
+    [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
 
     /// <summary>Keys this version doesn't know about, kept so saving doesn't drop them.</summary>
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }

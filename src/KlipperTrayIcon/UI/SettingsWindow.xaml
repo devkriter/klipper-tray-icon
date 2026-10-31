@@ -18,6 +18,19 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,4,0,12" />
         </Style>
+        <ToolTip x:Key="StreamTip">
+            <TextBlock TextWrapping="Wrap" MaxWidth="360">
+                <Run Text="How the picture is fetched. Only what this camera offers is listed." FontWeight="SemiBold" />
+                <LineBreak /><LineBreak />
+                <Run Text="•  H.264: the camera's own video (camera-streamer). Far less network traffic than MJPEG." />
+                <LineBreak />
+                <Run Text="•  MJPEG: a stream of pictures. Works almost everywhere." />
+                <LineBreak />
+                <Run Text="•  Snapshots: refreshed about ten times a second." />
+                <LineBreak /><LineBreak />
+                <Run Text="Automatic uses the first of these the camera has, and switches from H.264 to MJPEG if H.264 keeps dropping." />
+            </TextBlock>
+        </ToolTip>
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,16,0" />
@@ -99,13 +112,18 @@
 
             <!-- Filled from the printer's webcam list once it's been reached. -->
             <TextBlock Grid.Row="4" Text="Camera" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="CameraCombo" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8"
-                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" />
+            <ComboBox x:Name="CameraCombo" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
+            <!-- How each camera is fetched: whatever the printer turned out to offer. -->
+            <ComboBox x:Name="CameraStreamCombo" Grid.Row="4" Grid.Column="2" Width="170" Margin="8,0,0,8"
+                      DisplayMemberPath="Label" ToolTip="{StaticResource StreamTip}" />
             <TextBlock Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2"
-                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" />
+            <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
+            <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="5" Grid.Column="2" Width="170" Margin="8,0,0,0"
+                      DisplayMemberPath="Label" ToolTip="{StaticResource StreamTip}" />
             <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
-                       Text="Test connection lists the printer's cameras. The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen, which you can click on." />
+                       Text="Test connection lists the printer's cameras and the streams each one offers. The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen." />
 
             <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,4"
                       Content="Show the Klipper console next to the webcam" />

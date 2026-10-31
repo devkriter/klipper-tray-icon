@@ -43,13 +43,33 @@ public enum CameraView { Main, Second }
 
 public enum TouchAction { Down, Move, Up }
 
+/// <summary>How a Klipper webcam's pictures are fetched, best first.</summary>
+public enum StreamKind { H264, Mjpeg, Snapshots }
+
+public static class StreamKinds
+{
+    /// <summary>The config value ("h264", "mjpeg", "snapshots"); empty means automatic.</summary>
+    public static string ToConfig(StreamKind kind) => kind.ToString().ToLowerInvariant();
+
+    public static StreamKind? Parse(string? value) =>
+        Enum.TryParse<StreamKind>((value ?? "").Trim(), ignoreCase: true, out var kind) && Enum.IsDefined(kind) ? kind : null;
+
+    public static string Label(StreamKind kind) => kind switch
+    {
+        StreamKind.H264 => "H.264",
+        StreamKind.Mjpeg => "MJPEG",
+        _ => "Snapshots",
+    };
+}
+
 public static class PrinterBackends
 {
     public static IPrinterBackend Create(AppConfig config) =>
         config.IsBambu
             ? new BambuBackend(config.BambuIp, config.BambuSerial, config.BambuAccessCode)
             : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
-                                   webcamName: config.WebcamName, secondViewName: config.SecondViewName);
+                                   webcamName: config.WebcamName, secondViewName: config.SecondViewName,
+                                   webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream);
 
     /// <summary>The printer's cameras, for the settings window. Throws if it can't be reached.</summary>
     public static async Task<IReadOnlyList<WebcamInfo>> ListWebcamsAsync(AppConfig config, CancellationToken ct = default)
@@ -58,6 +78,16 @@ public static class PrinterBackends
             return []; // one built-in camera, nothing to choose
         using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
         return await backend.ListWebcamsAsync(ct);
+    }
+
+    /// <summary>The streams a camera offers, best first, for the settings window. Throws if it can't be reached.</summary>
+    public static async Task<IReadOnlyList<StreamKind>> ListStreamsAsync(AppConfig config, string cameraName, CameraView view,
+                                                                      CancellationToken ct = default)
+    {
+        if (config.IsBambu)
+            return [];
+        using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
+        return await backend.ListStreamsAsync(cameraName, view, ct);
     }
 
     /// <summary>Spins up a throwaway backend for config and reports (ok, message).</summary>

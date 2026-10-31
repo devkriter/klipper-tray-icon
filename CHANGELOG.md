@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.3.0] - 2026-10-31
+### Added
+- **Stream picker** next to each camera in Settings (Klipper). The app finds out what each camera
+  offers and lists only that:
+  - **H.264**: camera-streamer's hardware-encoded video (`video.h264`), decoded by Windows. Far
+    less network traffic than MJPEG (about 4 instead of 80 Mbit/s for a 1080p camera).
+  - **MJPEG**, as before.
+  - **Snapshots**, refreshed about ten times a second.
+
+  *Automatic* uses the first of these the camera has. If H.264 keeps dropping (3 times in 30 s),
+  it switches to MJPEG until the settings change or the app restarts. Config keys:
+  `webcam_stream`, `second_view_stream` (`h264`, `mjpeg`, `snapshots`; empty: automatic).
+- *Automatic* in the camera list now names the camera it picks, e.g. "Automatic (Chamber)".
+
 ## [2.2.0] - 2026-10-31
 ### Added
 - **Camera picker** (Settings, Klipper): choose which of the printer's webcams the popup shows.

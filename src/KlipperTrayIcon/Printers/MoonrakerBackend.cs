@@ -25,10 +25,12 @@ public sealed class MoonrakerBackend : IPrinterBackend
     private string? _lastFilename;
     private GcodeFileInfo _fileInfo = GcodeFileInfo.None;
     private readonly string _webcamName, _secondViewName;
+    private readonly StreamKind?[] _preferredStream = new StreamKind?[2]; // by CameraView; null: automatic
     private readonly ViewSource?[] _views = new ViewSource?[2]; // by CameraView
 
     public MoonrakerBackend(string moonrakerUrl, string apiKey = "", HttpClient? http = null,
-                            string webcamName = "", string secondViewName = "")
+                            string webcamName = "", string secondViewName = "",
+                            string webcamStream = "", string secondViewStream = "")
     {
         BaseUrl = NormalizeUrl(moonrakerUrl);
         ApiKey = (apiKey ?? "").Trim();
@@ -39,6 +41,8 @@ public sealed class MoonrakerBackend : IPrinterBackend
         _http = http ?? SharedHttp;
         _webcamName = (webcamName ?? "").Trim();
         _secondViewName = (secondViewName ?? "").Trim();
+        _preferredStream[(int)CameraView.Main] = StreamKinds.Parse(webcamStream);
+        _preferredStream[(int)CameraView.Second] = StreamKinds.Parse(secondViewStream);
     }
 
     public string BaseUrl { get; }
@@ -254,6 +258,10 @@ public sealed class MoonrakerBackend : IPrinterBackend
     // ---- webcam --------------------------------------------------------------
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
+    // Automatic gives up on H.264 for MJPEG after this many drops or refusals within the window.
+    private const int H264TroubleLimit = 3;
+    private static readonly TimeSpan H264TroubleWindow = TimeSpan.FromSeconds(30);
+    private readonly List<DateTime>[] _h264Trouble = [new(), new()]; // by CameraView
     // A polled view that hasn't changed still sends a frame this often, so the
     // popup doesn't take a still touchscreen for a stalled stream.
     private static readonly TimeSpan PollKeepAlive = TimeSpan.FromSeconds(5);
@@ -311,38 +319,95 @@ public sealed class MoonrakerBackend : IPrinterBackend
         try { webcams = await ListWebcamsAsync(ct); }
         catch (Exception) when (!ct.IsCancellationRequested) { return fallback; } // not cached: retry next time
 
-        var cam = wanted.Length > 0
-            ? webcams.FirstOrDefault(c => string.Equals(c.Name, wanted, StringComparison.OrdinalIgnoreCase))
-            : null;
-        if (cam == null && view == CameraView.Main)
-        {
-            // The first camera, preferring one that streams MJPEG. Iframes are
-            // web pages (like a remote screen), only shown when picked by name.
-            var usable = webcams.Where(c => c.Enabled && c.Service != "iframe").ToList();
-            cam = usable.FirstOrDefault(c => IsMjpegService(c.Service)) ?? usable.FirstOrDefault();
-        }
-        var (source, certain) = cam == null ? (fallback, true) : await ResolveAsync(cam, ct);
+        var cam = PickCamera(webcams, wanted, view);
+        var (source, certain) = cam == null ? (fallback, true) : await ResolveAsync(cam, _preferredStream[(int)view], ct);
         if (certain)
             _views[(int)view] = source;
         return source;
     }
 
     /// <summary>
-    /// The MJPEG stream of a webcam, or failing that its snapshot to poll.
-    /// WebRTC/HLS/iframe views need a browser, but the servers behind them
-    /// (camera-streamer, paxx12's firmware for the Snapmaker U1) usually serve
-    /// MJPEG next to them. Not certain (so not worth caching) when a probe got
-    /// no answer at all.
+    /// The webcam a view shows: the one named in Settings, or for the camera
+    /// with none named, the first one (preferring MJPEG). Iframes are web
+    /// pages (like a remote screen), only shown when picked by name.
     /// </summary>
-    private async Task<(ViewSource Source, bool Certain)> ResolveAsync(WebcamInfo cam, CancellationToken ct)
+    public static WebcamInfo? PickCamera(IReadOnlyList<WebcamInfo> webcams, string name, CameraView view)
+    {
+        var cam = name.Length > 0
+            ? webcams.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+            : null;
+        if (cam == null && view == CameraView.Main)
+        {
+            var usable = webcams.Where(c => c.Enabled && c.Service != "iframe").ToList();
+            cam = usable.FirstOrDefault(c => IsMjpegService(c.Service)) ?? usable.FirstOrDefault();
+        }
+        return cam;
+    }
+
+    /// <summary>The streams a webcam offers, best first (for Settings). Throws if Moonraker can't be reached.</summary>
+    public async Task<IReadOnlyList<StreamKind>> ListStreamsAsync(string cameraName, CameraView view, CancellationToken ct)
+    {
+        if (PickCamera(await ListWebcamsAsync(ct), cameraName, view) is not { } cam)
+            return [];
+        var (streams, _, _) = await DiscoverAsync(cam, ct);
+        return streams.Select(s => s.Kind).ToList();
+    }
+
+    /// <summary>
+    /// How to show a webcam: the stream picked in Settings if it offers it,
+    /// else the best one it has. Not certain (so not worth caching) when a
+    /// probe got no answer at all.
+    /// </summary>
+    private async Task<(ViewSource Source, bool Certain)> ResolveAsync(WebcamInfo cam, StreamKind? preferred, CancellationToken ct)
+    {
+        var (streams, touch, certain) = await DiscoverAsync(cam, ct);
+        var pick = streams.FirstOrDefault(s => s.Kind == preferred) ?? streams[0];
+        string snapshot = streams[^1].Url; // snapshots are always last
+        if (pick.Kind == StreamKind.Snapshots)
+            return (new ViewSource(null, snapshot, touch, StreamKind.Snapshots), certain);
+        // Automatic H.264 keeps MJPEG in reserve, in case H.264 turns out unreliable.
+        string? fallback = preferred == null && pick.Kind == StreamKind.H264
+            ? streams.FirstOrDefault(s => s.Kind == StreamKind.Mjpeg)?.Url
+            : null;
+        return (new ViewSource(pick.Url, snapshot, null, pick.Kind, fallback), certain);
+    }
+
+    /// <summary>
+    /// Every way a webcam can be shown, best first: H.264 (camera-streamer
+    /// serves its hardware-encoded video as video.h264, at a fraction of
+    /// MJPEG's bandwidth), MJPEG, and polling its snapshot, which is always
+    /// offered. WebRTC/HLS/iframe views need a browser, but the servers behind
+    /// them (camera-streamer, paxx12's firmware for the Snapmaker U1) usually
+    /// serve one of these next to them. Touch is the remote screen's tap URL
+    /// if the view is one (paxx12's page sends taps to "touch" next to it).
+    /// </summary>
+    internal async Task<(List<StreamChoice> Streams, string? Touch, bool Certain)> DiscoverAsync(WebcamInfo cam, CancellationToken ct)
     {
         string stream = Absolute(cam.StreamUrl);
         string snapshot = cam.SnapshotUrl.Length > 0 ? Absolute(cam.SnapshotUrl) : stream.Replace("action=stream", "action=snapshot");
-        if (IsMjpegService(cam.Service))
-            return (new ViewSource(stream, snapshot, null), true);
-
-        bool certain = true;
         string folder = Folder(stream);
+
+        string h264Url = stream.EndsWith(".h264", StringComparison.OrdinalIgnoreCase) ? stream : folder + "video.h264";
+        var h264 = IsH264Async(h264Url, ct);
+        var mjpeg = FindMjpegAsync(cam, stream, folder, ct);
+        var touch = PageMentionsAsync(stream, "touch?a=", ct);
+        await Task.WhenAll(h264, mjpeg, touch);
+
+        var streams = new List<StreamChoice>();
+        if (h264.Result == true)
+            streams.Add(new StreamChoice(StreamKind.H264, h264Url));
+        if (mjpeg.Result.Url is string mjpegUrl)
+            streams.Add(new StreamChoice(StreamKind.Mjpeg, mjpegUrl));
+        streams.Add(new StreamChoice(StreamKind.Snapshots, snapshot));
+        bool certain = h264.Result != null && mjpeg.Result.Certain && touch.Result != null;
+        return (streams, touch.Result == true ? folder + "touch" : null, certain);
+    }
+
+    private async Task<(string? Url, bool Certain)> FindMjpegAsync(WebcamInfo cam, string stream, string folder, CancellationToken ct)
+    {
+        if (IsMjpegService(cam.Service))
+            return (stream, true);
+        bool certain = true;
         string[] candidates = stream.Contains("action=stream")
             ? [stream]
             : [folder + "stream.mjpg", folder + "stream", folder + "?action=stream"];
@@ -350,15 +415,49 @@ public sealed class MoonrakerBackend : IPrinterBackend
         {
             bool? mjpeg = await IsMjpegAsync(candidate, ct);
             if (mjpeg == true)
-                return (new ViewSource(candidate, snapshot, null), true);
+                return (candidate, true);
             certain &= mjpeg != null;
         }
+        return (null, certain);
+    }
 
-        // No stream: poll the snapshot. paxx12's remote screen also takes taps,
-        // which its page sends to "touch" next to it.
-        bool? touch = await PageMentionsAsync(stream, "touch?a=", ct);
-        certain &= touch != null;
-        return (new ViewSource(null, snapshot, touch == true ? folder + "touch" : null), certain);
+    /// <summary>Whether the URL serves raw H.264 (starts with an Annex B start code); null if it couldn't be asked.</summary>
+    private async Task<bool?> IsH264Async(string url, CancellationToken ct)
+    {
+        // camera-streamer sometimes answers 500 for a moment; ask twice before deciding.
+        for (int attempt = 0; ; attempt++)
+        {
+            var (found, serverError) = await ProbeH264Async(url, ct);
+            if (!serverError || attempt == 1)
+                return found;
+            await Task.Delay(300, ct);
+        }
+    }
+
+    private async Task<(bool? Found, bool ServerError)> ProbeH264Async(string url, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(3));
+        try
+        {
+            using var request = Request(HttpMethod.Get, url);
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if ((int)response.StatusCode >= 500)
+                return (false, true);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType?.StartsWith("text/") == true)
+                return (false, false);
+            await using var body = await response.Content.ReadAsStreamAsync(cts.Token);
+            var head = new byte[8];
+            int read = 0, n;
+            while (read < head.Length && (n = await body.ReadAsync(head.AsMemory(read), cts.Token)) > 0)
+                read += n;
+            int start = head.AsSpan(0, read).IndexOf((ReadOnlySpan<byte>)[0, 0, 1]);
+            return (start is >= 0 and <= 1, false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return (null, false);
+        }
     }
 
     private HttpRequestMessage Request(HttpMethod method, string url)
@@ -416,11 +515,63 @@ public sealed class MoonrakerBackend : IPrinterBackend
     {
         if (await GetViewSourceAsync(view, ct) is not { } source)
             yield break;
+        if (source is { Kind: StreamKind.H264, Stream: string video })
+        {
+            var trouble = _h264Trouble[(int)view];
+            while (!ct.IsCancellationRequested)
+            {
+                int pictures = 0;
+                await foreach (var picture in ReadH264Async(video, ct))
+                {
+                    pictures++;
+                    yield return picture;
+                }
+                if (ct.IsCancellationRequested)
+                    break;
+                lock (trouble)
+                {
+                    trouble.Add(DateTime.UtcNow);
+                    trouble.RemoveAll(t => DateTime.UtcNow - t > H264TroubleWindow);
+                    if (source.Fallback is string mjpeg && trouble.Count >= H264TroubleLimit)
+                    {
+                        // Automatic, and H.264 keeps failing: MJPEG from now on (until settings change).
+                        _views[(int)view] = source with { Stream = mjpeg, Kind = StreamKind.Mjpeg, Fallback = null };
+                        yield break;
+                    }
+                }
+                // Refused (camera-streamer answers 500 at times): let the popup wait and retry.
+                if (pictures == 0)
+                    yield break;
+                // Hung up mid-stream, which camera-streamer's video.h264 does every few
+                // seconds on some printers. A new connection starts with a keyframe, so
+                // carry straight on.
+            }
+            yield break;
+        }
         var frames = source.Stream is string stream
             ? MjpegReader.ReadFramesAsync(_http, stream, HeadersFor(stream), ct)
             : PollSnapshotsAsync(source.Snapshot, ct);
         await foreach (var frame in frames)
             yield return new ImageFrame(frame);
+    }
+
+    /// <summary>A raw H.264 stream (camera-streamer's video.h264), decoded by Windows.</summary>
+    private async IAsyncEnumerable<CameraFrame> ReadH264Async(string url, [EnumeratorCancellation] CancellationToken ct)
+    {
+        using var decoder = new H264Decoder();
+        var splitter = new AnnexBSplitter();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await foreach (var chunk in StreamDownload.ReadChunksAsync(_http, url, HeadersFor(url), ct))
+        {
+            foreach (var unit in splitter.Feed(chunk))
+            {
+                List<PixelFrame> pictures;
+                try { pictures = decoder.Decode(unit, clock.Elapsed.Ticks); }
+                catch (System.Runtime.InteropServices.COMException) { continue; } // a damaged picture; the next keyframe recovers
+                foreach (var picture in pictures)
+                    yield return picture;
+            }
+        }
     }
 
     /// <summary>
@@ -531,8 +682,12 @@ public sealed class MoonrakerBackend : IPrinterBackend
 /// <summary>A camera from Moonraker's list (set up in Mainsail/Fluidd).</summary>
 public sealed record WebcamInfo(string Name, string Service, string StreamUrl, string SnapshotUrl, bool Enabled = true);
 
-/// <summary>Where a view's pictures come from: an MJPEG stream if it has one, else its snapshot, polled.</summary>
-internal sealed record ViewSource(string? Stream, string Snapshot, string? Touch);
+/// <summary>Where a view's pictures come from: a stream (H.264 or MJPEG), else its snapshot, polled.</summary>
+internal sealed record ViewSource(string? Stream, string Snapshot, string? Touch, StreamKind Kind = StreamKind.Mjpeg,
+                                  string? Fallback = null);
+
+/// <summary>One way a webcam can be shown; for snapshots, Url is the snapshot.</summary>
+internal sealed record StreamChoice(StreamKind Kind, string Url);
 
 public sealed class MoonrakerHttpException(HttpStatusCode statusCode)
     : Exception($"HTTP {(int)statusCode}")

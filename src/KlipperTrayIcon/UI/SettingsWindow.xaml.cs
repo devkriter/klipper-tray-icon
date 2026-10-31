@@ -15,6 +15,11 @@ public partial class SettingsWindow : Window
     private readonly AppConfig _original;
     private readonly bool _firstRun;
     private bool _testing;
+    // The printer's cameras once it has been reached, and the settings that reached it.
+    private IReadOnlyList<WebcamInfo>? _webcams;
+    private AppConfig? _reached;
+    private bool _filling;
+    private readonly int[] _streamRequests = new int[2]; // by CameraView: only the latest answer counts
 
     /// <summary>The saved config, or null if the user cancelled.</summary>
     public AppConfig? Result { get; private set; }
@@ -39,6 +44,8 @@ public partial class SettingsWindow : Window
         ConsoleCheck.IsChecked = config.WebcamConsole;
         HideTimelapseCheck.IsChecked = config.ConsoleHideTimelapse;
         FillSources(null, config.WebcamName, config.SecondViewName);
+        FillStreams(CameraView.Main, null, config.WebcamStream);
+        FillStreams(CameraView.Second, null, config.SecondViewStream);
         IpBox.Text = config.BambuIp;
         SerialBox.Text = config.BambuSerial;
         CodeHidden.Password = config.BambuAccessCode;
@@ -117,6 +124,8 @@ public partial class SettingsWindow : Window
             config.ConsoleHideTimelapse = HideTimelapseCheck.IsChecked == true;
             config.WebcamName = Selected(CameraCombo);
             config.SecondViewName = Selected(SecondViewCombo);
+            config.WebcamStream = Selected(CameraStreamCombo);
+            config.SecondViewStream = Selected(SecondViewStreamCombo);
         }
         else
         {
@@ -156,9 +165,58 @@ public partial class SettingsWindow : Window
         try
         {
             var webcams = await Task.Run(() => PrinterBackends.ListWebcamsAsync(config));
+            (_webcams, _reached) = (webcams, config);
             FillSources(webcams, Selected(CameraCombo), Selected(SecondViewCombo));
         }
-        catch (Exception) { }
+        catch (Exception) { return; }
+        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second));
+    }
+
+    private void OnCameraChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_filling && _webcams != null)
+            _ = LoadStreamsAsync(sender == CameraCombo ? CameraView.Main : CameraView.Second);
+    }
+
+    /// <summary>Asks the picked camera which streams it offers and lists them.</summary>
+    private async Task LoadStreamsAsync(CameraView view)
+    {
+        string camera = Selected(view == CameraView.Main ? CameraCombo : SecondViewCombo);
+        var streamCombo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
+        int request = ++_streamRequests[(int)view];
+        if (_reached == null || (view == CameraView.Second && camera.Length == 0))
+        {
+            FillStreams(view, [], Selected(streamCombo));
+            return;
+        }
+        streamCombo.IsEnabled = false;
+        IReadOnlyList<StreamKind>? kinds;
+        try { kinds = await Task.Run(() => PrinterBackends.ListStreamsAsync(_reached, camera, view)); }
+        catch (Exception) { kinds = null; }
+        if (request == _streamRequests[(int)view]) // not overtaken by another pick
+            FillStreams(view, kinds, Selected(streamCombo));
+    }
+
+    /// <summary>
+    /// "Automatic (H.264)" plus each stream the camera offers. A saved choice
+    /// it doesn't offer still shows, so it isn't lost. Off while the second
+    /// view is None.
+    /// </summary>
+    private void FillStreams(CameraView view, IReadOnlyList<StreamKind>? kinds, string selected)
+    {
+        var combo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
+        var items = new List<SourceItem>
+        {
+            new("", kinds is { Count: > 0 } ? $"Automatic ({StreamKinds.Label(kinds[0])})" : "Automatic"),
+        };
+        foreach (var kind in kinds ?? [])
+            items.Add(new SourceItem(StreamKinds.ToConfig(kind), StreamKinds.Label(kind)));
+        if (StreamKinds.Parse(selected) is { } saved && !items.Exists(i => i.Name == StreamKinds.ToConfig(saved)))
+            items.Add(new SourceItem(StreamKinds.ToConfig(saved),
+                                     kinds == null ? StreamKinds.Label(saved) : $"{StreamKinds.Label(saved)} · not offered"));
+        combo.ItemsSource = items;
+        combo.SelectedItem = items.Find(i => i.Name == (StreamKinds.Parse(selected) is { } k ? StreamKinds.ToConfig(k) : "")) ?? items[0];
+        combo.IsEnabled = view == CameraView.Main || Selected(SecondViewCombo).Length > 0;
     }
 
     /// <summary>
@@ -183,12 +241,18 @@ public partial class SettingsWindow : Window
             combo.SelectedItem = items.Find(i => string.Equals(i.Name, selected, StringComparison.OrdinalIgnoreCase)) ?? items[0];
         }
 
-        Fill(CameraCombo, Items(webcams, new SourceItem("", "Automatic (the first camera)"), camera), camera);
+        // Automatic names the camera it would pick, once the list is known.
+        string automatic = webcams != null && MoonrakerBackend.PickCamera(webcams, "", CameraView.Main) is { } first
+            ? $"Automatic ({first.Name})"
+            : "Automatic";
+        _filling = true;
+        Fill(CameraCombo, Items(webcams, new SourceItem("", automatic), camera), camera);
         Fill(SecondViewCombo, Items(webcams, new SourceItem("", "None"), secondView), secondView);
+        _filling = false;
         if (webcams != null)
             SourcesHint.Text = webcams.Count == 0
                 ? "The printer has no cameras set up (in Mainsail/Fluidd: Settings → Webcams)."
-                : "The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen, which you can click on.";
+                : "Next to each camera: how it's fetched (only what it offers is listed). The webcam popup gets a button to switch to the second view, e.g. a remote touchscreen.";
     }
 
     private void Warn(string title, string text) =>

@@ -11,10 +11,29 @@ namespace KlipperTrayIcon.Printers;
 /// <summary>Reads an HTTP MJPEG (multipart/x-mixed-replace) stream into JPEG frames.</summary>
 public static class MjpegReader
 {
+    public static async IAsyncEnumerable<byte[]> ReadFramesAsync(
+        HttpClient http, string url, IReadOnlyDictionary<string, string>? headers,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var parser = new JpegFrameParser();
+        await foreach (var chunk in StreamDownload.ReadChunksAsync(http, url, headers, ct))
+            foreach (var frame in parser.Feed(chunk))
+                yield return frame;
+    }
+}
+
+/// <summary>A never-ending HTTP download (a video stream), read in chunks.</summary>
+public static class StreamDownload
+{
     /// <summary>Gives up if the server hasn't even sent headers by then.</summary>
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
 
-    public static async IAsyncEnumerable<byte[]> ReadFramesAsync(
+    /// <summary>
+    /// The body as it arrives. Each chunk reuses one buffer, so use it before
+    /// asking for the next. Unreachable, an error status or a dropped
+    /// connection just ends it.
+    /// </summary>
+    public static async IAsyncEnumerable<ArraySegment<byte>> ReadChunksAsync(
         HttpClient http, string url, IReadOnlyDictionary<string, string>? headers,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -23,8 +42,6 @@ public static class MjpegReader
             foreach (var (name, value) in headers)
                 request.Headers.TryAddWithoutValidation(name, value);
 
-        // Unreachable / timed out / error status: just end, and the caller
-        // shows "Camera unavailable".
         HttpResponseMessage? response = await ConnectAsync(http, request, ct);
         if (response == null)
             yield break;
@@ -37,15 +54,13 @@ public static class MjpegReader
 
             await using (stream)
             {
-                var parser = new JpegFrameParser();
                 var chunk = new byte[64 * 1024];
                 while (!ct.IsCancellationRequested)
                 {
                     int read = await TryAsync(() => stream.ReadAsync(chunk, ct).AsTask(), fallback: 0);
                     if (read == 0)
                         yield break;
-                    foreach (var frame in parser.Feed(chunk.AsSpan(0, read)))
-                        yield return frame;
+                    yield return new ArraySegment<byte>(chunk, 0, read);
                 }
             }
         }

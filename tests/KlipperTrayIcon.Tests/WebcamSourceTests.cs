@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -60,7 +61,7 @@ public class WebcamSourceTests
         Assert.Equal("gui", backend.SecondViewName);
 
         var source = await backend.GetViewSourceAsync(CameraView.Second, default);
-        Assert.Equal(new ViewSource(null, "http://p/screen/snapshot", "http://p/screen/touch"), source);
+        Assert.Equal(new ViewSource(null, "http://p/screen/snapshot", "http://p/screen/touch", StreamKind.Snapshots), source);
         Assert.True(backend.IsTouchable(CameraView.Second));
         Assert.False(backend.IsTouchable(CameraView.Main));
 
@@ -120,6 +121,92 @@ public class WebcamSourceTests
         down = false;
         Assert.Equal("http://p/webcam/stream.mjpg", (await backend.GetViewSourceAsync(CameraView.Main, default))!.Stream); // ...so not cached
     }
+
+    // ---- streams ---------------------------------------------------------------
+
+    // camera-streamer behind Mainsail's "WebRTC (camera-streamer)": raw H.264
+    // at video.h264 and MJPEG at stream, next to the WebRTC page.
+    private const string CameraStreamerWebcams = """
+        {"result":{"webcams":[{"name":"Chamber","enabled":true,"service":"webrtc-camerastreamer",
+           "stream_url":"/webcam/webrtc","snapshot_url":"/webcam/?action=snapshot"}]}}
+        """;
+
+    private static readonly byte[] H264Bars = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Assets", "smptebars_1080p.h264"));
+
+    private static HttpClient CameraStreamer(Func<HttpResponseMessage?>? video = null) => Stub(r => r.RequestUri!.PathAndQuery switch
+    {
+        "/server/webcams/list" => Json(CameraStreamerWebcams),
+        "/webcam/video.h264" => video != null ? video() : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(H264Bars) },
+        "/webcam/stream" => Mjpeg(),
+        _ => null,
+    });
+
+    [Fact]
+    public async Task OffersH264ThenMjpegThenSnapshots()
+    {
+        var backend = new MoonrakerBackend("p", http: CameraStreamer());
+        Assert.Equal([StreamKind.H264, StreamKind.Mjpeg, StreamKind.Snapshots], await backend.ListStreamsAsync("", CameraView.Main, default));
+        // Automatic: H.264, with MJPEG in reserve.
+        Assert.Equal(new ViewSource("http://p/webcam/video.h264", "http://p/webcam/?action=snapshot", null, StreamKind.H264,
+                                    Fallback: "http://p/webcam/stream"),
+                     await backend.GetViewSourceAsync(CameraView.Main, default));
+    }
+
+    [Theory]
+    [InlineData("h264", "http://p/webcam/video.h264", StreamKind.H264)]
+    [InlineData("mjpeg", "http://p/webcam/stream", StreamKind.Mjpeg)]
+    [InlineData("snapshots", null, StreamKind.Snapshots)]
+    public async Task UsesThePickedStream(string picked, string? stream, StreamKind kind)
+    {
+        var backend = new MoonrakerBackend("p", http: CameraStreamer(), webcamStream: picked);
+        var source = await backend.GetViewSourceAsync(CameraView.Main, default);
+        Assert.Equal((stream, kind, (string?)null), (source!.Stream, source.Kind, source.Fallback)); // picked: no switching
+    }
+
+    [Fact]
+    public async Task PickedStreamTheCameraDoesNotOfferFallsBackToTheBest()
+    {
+        var backend = new MoonrakerBackend("p", http: U1Printer(new()), webcamStream: "h264");
+        Assert.Equal(new ViewSource("http://p/webcam/stream.mjpg", "http://p/webcam/snapshot.jpg", null),
+                     await backend.GetViewSourceAsync(CameraView.Main, default));
+    }
+
+    [Fact]
+    public async Task AsksAgainWhenH264AnswersServerError()
+    {
+        int calls = 0;
+        var backend = new MoonrakerBackend("p", http: CameraStreamer(() => ++calls == 1
+            ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(H264Bars) }));
+        Assert.Equal(StreamKind.H264, (await backend.GetViewSourceAsync(CameraView.Main, default))!.Kind);
+    }
+
+    [Fact]
+    public async Task DecodesH264AndSwitchesToMjpegWhenItKeepsHangingUp()
+    {
+        // Every connection plays the clip and hangs up, as camera-streamer does on some printers.
+        var backend = new MoonrakerBackend("p", http: CameraStreamer());
+        int pictures = 0;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await foreach (var frame in backend.GetWebcamFramesAsync(CameraView.Main, cts.Token))
+        {
+            using (frame)
+                Assert.IsType<PixelFrame>(frame);
+            pictures++;
+        }
+        Assert.True(pictures > 3, $"only {pictures} pictures");
+        // Reconnected by itself twice, then gave up on H.264 for the reserve.
+        var source = await backend.GetViewSourceAsync(CameraView.Main, default);
+        Assert.Equal(("http://p/webcam/stream", StreamKind.Mjpeg), (source!.Stream, source.Kind));
+    }
+
+    [Theory]
+    [InlineData("h264", StreamKind.H264)]
+    [InlineData("MJPEG", StreamKind.Mjpeg)]
+    [InlineData(" snapshots ", StreamKind.Snapshots)]
+    [InlineData("", null)]
+    [InlineData("webrtc", null)]
+    public void ParsesStreamSetting(string value, StreamKind? kind) => Assert.Equal(kind, StreamKinds.Parse(value));
 
     [Theory]
     [InlineData("http://p/webcam/webrtc", "http://p/webcam/")]

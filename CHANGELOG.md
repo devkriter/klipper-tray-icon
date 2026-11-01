@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.11.0] - 2026-11-01
+### Added
+- Updates: once a day (20 seconds after start, then daily) the app asks GitHub for the latest
+  release. When there's a newer one, *Update to vX* shows in the tray menu and Settings shows
+  *Update now* and *What's new*; nothing pops up. One click downloads the zip, checks it against
+  GitHub's SHA-256, swaps the app's files (keeping `config.json`) and restarts into the new
+  version. If anything fails the old files stay in place, with an offer to open the release page.
+- Settings: the app's version, *Check for updates* (on by default) and *Check now*.
+
 ## [2.10.0] - 2026-11-01
 ### Added
 - Print queue: a small ▶ on each queued job and recent upload prints that file now. Like Start

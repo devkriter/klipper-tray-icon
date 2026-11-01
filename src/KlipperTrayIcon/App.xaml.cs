@@ -29,6 +29,12 @@ public partial class App : Application
         string folderId = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes(ConfigStore.AppDir.ToLowerInvariant())))[..16];
         _singleInstance = new Mutex(true, @"Local\KlipperTrayIcon-" + folderId, out bool first);
+        if (!first && Array.IndexOf(e.Args, "--updated") >= 0)
+        {
+            // Started by the old version as it updated: wait for it to finish exiting.
+            try { first = _singleInstance.WaitOne(TimeSpan.FromSeconds(15)); }
+            catch (AbandonedMutexException) { first = true; }
+        }
         var showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\KlipperTrayIcon-show-" + folderId);
         if (!first)
         {
@@ -72,6 +78,7 @@ public partial class App : Application
             ConfigStore.Save(config);
         }
 
+        Updater.CleanUp();
         Autostart.RefreshPath();
         _tray = new TrayController(config);
         if (Array.IndexOf(e.Args, "--settings") >= 0)

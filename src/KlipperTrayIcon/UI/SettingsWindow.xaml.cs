@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using KlipperTrayIcon.Printers;
@@ -29,15 +30,19 @@ public partial class SettingsWindow : Window
     // The second view's entry for the U1's touchscreen (camera names can't start with ':').
     private const string Touchscreen = ":touchscreen";
     private bool _tilesChanged;
+    private readonly Updater? _updater;
+    private readonly Action? _update;
 
     /// <summary>The saved config, or null if the user cancelled.</summary>
     public AppConfig? Result { get; private set; }
 
-    public SettingsWindow(AppConfig config, bool firstRun)
+    public SettingsWindow(AppConfig config, bool firstRun, Updater? updater = null, Action? update = null)
     {
         InitializeComponent();
         _original = config;
         _firstRun = firstRun;
+        _updater = updater;
+        _update = update;
 
         if (firstRun)
         {
@@ -64,6 +69,13 @@ public partial class SettingsWindow : Window
         IntervalBox.Text = config.UpdateIntervalSeconds.ToString("0");
         NotifyCheck.IsChecked = config.Notifications;
         AutostartCheck.IsChecked = firstRun || Autostart.IsEnabled;
+        UpdateCheck.IsChecked = config.CheckForUpdates;
+        ShowVersion();
+        if (updater != null)
+        {
+            updater.Changed += ShowVersion;
+            Closed += (_, _) => updater.Changed -= ShowVersion;
+        }
 
         Loaded += (_, _) => (config.IsBambu ? (Control)IpBox : UrlBox).Focus();
         // A printer that's already set up: list its cameras straight away.
@@ -211,7 +223,44 @@ public partial class SettingsWindow : Window
         }
         config.UpdateIntervalSeconds = int.TryParse(IntervalBox.Text, out int interval) ? Math.Clamp(interval, 1, 60) : 2;
         config.Notifications = NotifyCheck.IsChecked == true;
+        config.CheckForUpdates = UpdateCheck.IsChecked == true;
         return config;
+    }
+
+    // ---- version and updates -------------------------------------------------
+
+    private void ShowVersion()
+    {
+        var text = VersionText.Inlines;
+        text.Clear();
+        text.Add(new Run($"Version {Updater.Current}"));
+        if (_updater == null)
+            return;
+        text.Add(new Run(" · "));
+        if (_updater.Installing is double done)
+            text.Add(new Run($"Downloading {_updater.Available?.Tag}… {done:0%}"));
+        else if (_updater.Available is { } release)
+        {
+            text.Add(new Run($"{release.Tag} is available: "));
+            text.Add(Link("Update now", () => _update?.Invoke()));
+            text.Add(new Run(" · "));
+            text.Add(Link("What's new", () => Updater.OpenPage(release.PageUrl)));
+        }
+        else if (_updater.Checking)
+            text.Add(new Run("Checking for updates…"));
+        else
+        {
+            if (_updater.LastChecked != null)
+                text.Add(new Run("Up to date · "));
+            text.Add(Link("Check now", () => _ = _updater.CheckAsync()));
+        }
+    }
+
+    private static Hyperlink Link(string text, Action click)
+    {
+        var link = new Hyperlink(new Run(text));
+        link.Click += (_, _) => click();
+        return link;
     }
 
     // ---- camera sources --------------------------------------------------------

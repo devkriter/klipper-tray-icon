@@ -32,6 +32,9 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   including any of the printer's other temperature sensors. If Klipper shuts down, the console says
   why, with *Click to restart* under it. The console can be turned off in Settings.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
+- **Quiet updates**: once a day the app checks GitHub for a new release. Nothing pops up: an
+  *Update to vX* item appears in the tray menu (and *Update now* in Settings), and one click
+  downloads it, checks it and restarts into it, keeping your settings. Turn checking off in Settings.
 - **Settings window**: switch printers, test the connection, change the refresh rate, and turn
   notifications and *Start with Windows* on or off. Changes apply immediately.
 - **Two Printer Backends**:
@@ -124,6 +127,9 @@ by tests but haven't been tried on a printer yet.
    files next to it).
 4. On first launch, pick your printer type, enter its details and click **Start**.
 
+**Updating:** from 2.11 on, the app offers new versions in its tray menu and updates itself in one
+click. To update by hand, replace the files with the new zip's, keeping your `config.json`.
+
 **Upgrading from 1.x:** copy your old `config.json` next to the new `KlipperTrayIcon.exe` — the
 settings format hasn't changed. *Start with Windows* is carried over automatically.
 
@@ -174,7 +180,8 @@ For Klipper/Moonraker (see `config.example.json`):
     "second_view_name": "",
     "second_view_stream": "",
     "update_interval_seconds": 2,
-    "notifications": true
+    "notifications": true,
+    "check_for_updates": true
 }
 ```
 

@@ -302,7 +302,11 @@
             <TextBlock Text="seconds" VerticalAlignment="Center" />
         </StackPanel>
         <CheckBox x:Name="NotifyCheck" Content="Notify me when a print finishes, fails or pauses" Margin="0,0,0,6" />
-        <CheckBox x:Name="AutostartCheck" Content="Start with Windows" />
+        <CheckBox x:Name="AutostartCheck" Content="Start with Windows" Margin="0,0,0,6" />
+        <CheckBox x:Name="UpdateCheck" Content="Check for updates"
+                  ToolTip="Once a day. A new version is only offered in the tray menu and here, nothing pops up." />
+        <!-- The version, and the update when there is one (filled in code). -->
+        <TextBlock x:Name="VersionText" Style="{StaticResource Hint}" Margin="0,8,0,0" />
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
             <Button x:Name="SaveButton" Content="Save" MinWidth="96" IsDefault="True" Click="OnSaveClick"

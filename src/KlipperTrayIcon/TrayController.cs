@@ -18,6 +18,8 @@ public sealed class TrayController : IDisposable
     private readonly Forms.ToolStripMenuItem[] _statusItems = new Forms.ToolStripMenuItem[3];
     private readonly Forms.ToolStripMenuItem _webcamItem;
     private readonly Forms.ToolStripMenuItem _dashboardItem;
+    private readonly Forms.ToolStripMenuItem _updateItem;
+    private readonly Updater _updater = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     private AppConfig _config;
@@ -53,6 +55,9 @@ public sealed class TrayController : IDisposable
         _dashboardItem = new Forms.ToolStripMenuItem("Open web interface", null, (_, _) => OpenDashboard());
         menu.Items.Add(_dashboardItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
+        // Only there once a newer release is out: the one place the app mentions it unasked.
+        _updateItem = new Forms.ToolStripMenuItem("", null, (_, _) => Update()) { Visible = false };
+        menu.Items.Add(_updateItem);
         menu.Items.Add(new Forms.ToolStripMenuItem("Settings…", null, (_, _) => OpenSettings()));
         menu.Items.Add(new Forms.ToolStripMenuItem("Exit", null, (_, _) => Exit()));
         menu.Opening += (_, _) => RefreshMenu();
@@ -74,6 +79,8 @@ public sealed class TrayController : IDisposable
         _backend.Start();
         CreatePopup();
         _ = Task.Run(() => StatusLoopAsync(_shutdown.Token));
+        _updater.Changed += RefreshUpdateItem;
+        _updater.SetAutoCheck(config.CheckForUpdates);
     }
 
     private static int IconSize => Forms.SystemInformation.SmallIconSize.Width;
@@ -90,6 +97,40 @@ public sealed class TrayController : IDisposable
         }
         _webcamItem.Visible = _backend.SupportsWebcam;
         _dashboardItem.Visible = _backend.DashboardUrl != null;
+    }
+
+    private void RefreshUpdateItem()
+    {
+        _updateItem.Visible = _updater.Available != null;
+        _updateItem.Enabled = _updater.Installing == null;
+        _updateItem.Text = _updater.Installing is double done ? $"Downloading update… {done:0%}"
+                           : _updater.Available is { } release ? $"Update to {release.Tag}" : "";
+        _updateItem.ToolTipText = _updater.Available is { } r ? $"Installs {r.Tag} and restarts. You're on {Updater.Current}." : null;
+    }
+
+    /// <summary>Installs the newer release and restarts into it.</summary>
+    public async void Update()
+    {
+        if (_updater.Available is not { } release || _updater.Installing != null)
+            return;
+        string exe;
+        try
+        {
+            exe = await _updater.InstallAsync(release, _shutdown.Token);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception e)
+        {
+            var answer = System.Windows.MessageBox.Show(
+                $"Couldn't update to {release.Tag}: {e.Message}\n\nOpen the release page to download it yourself?",
+                "Klipper Tray Icon", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+            if (answer == System.Windows.MessageBoxResult.Yes)
+                Updater.OpenPage(release.PageUrl);
+            return;
+        }
+        // The new version waits for this one to exit before it takes over the tray.
+        Process.Start(new ProcessStartInfo(exe, "--updated") { UseShellExecute = false, WorkingDirectory = ConfigStore.AppDir });
+        Exit();
     }
 
     private void ShowWebcam() => _popup?.ShowAtCursor();
@@ -124,7 +165,7 @@ public sealed class TrayController : IDisposable
             _settings.Activate();
             return;
         }
-        _settings = new SettingsWindow(_config.Clone(), firstRun: false);
+        _settings = new SettingsWindow(_config.Clone(), firstRun: false, _updater, Update);
         _settings.Closed += (_, _) =>
         {
             var result = _settings.Result;
@@ -175,6 +216,8 @@ public sealed class TrayController : IDisposable
     {
         var oldBackend = _backend;
         var oldPopup = _popup;
+        if (config.CheckForUpdates != _config.CheckForUpdates)
+            _updater.SetAutoCheck(config.CheckForUpdates);
         _config = config;
         _backend = PrinterBackends.Create(config);
         _backend.Start();
@@ -276,6 +319,7 @@ public sealed class TrayController : IDisposable
         _shutdown.Cancel();
         _popup?.Shutdown();
         _settings?.Close();
+        _updater.Dispose();
         _backend.Dispose();
         _icon.Visible = false;
         _icon.Icon?.Dispose();

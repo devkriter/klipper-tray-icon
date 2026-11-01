@@ -20,6 +20,8 @@ public sealed class AppConfig
     [JsonPropertyName("bambu_access_code")] public string BambuAccessCode { get; set; } = "";
     [JsonPropertyName("update_interval_seconds")] public double UpdateIntervalSeconds { get; set; } = 2;
     [JsonPropertyName("notifications")] public bool Notifications { get; set; } = true;
+    /// <summary>Look for new releases on GitHub once a day (only offered in the menu and Settings, never popped up).</summary>
+    [JsonPropertyName("check_for_updates")] public bool CheckForUpdates { get; set; } = true;
     [JsonPropertyName("webcam_console")] public bool WebcamConsole { get; set; } = true;
     /// <summary>Moonraker webcam to show; empty picks the first one.</summary>
     [JsonPropertyName("webcam_name")] public string WebcamName { get; set; } = "";

@@ -80,7 +80,8 @@ public sealed class BambuBackend : IPrinterBackend
         string filename = GetString(print, "subtask_name");
         if (filename.Length == 0)
             filename = GetString(print, "gcode_file");
-        return new PrinterStatus(state, percent / 100.0, filename, remainingMinutes * 60, "Slicer");
+        return new PrinterStatus(state, percent / 100.0, filename, remainingMinutes * 60, "Slicer",
+                                 Preparing: gcodeState is "PREPARE" or "SLICING");
     }
 
     private static string GetString(JsonObject o, string name) =>

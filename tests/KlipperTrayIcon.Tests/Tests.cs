@@ -42,6 +42,62 @@ public class StatusTextTests
     }
 
     [Fact]
+    public void ChamberTileOnlyWithAChamberSensor()
+    {
+        var details = new PrintDetails(new Heater(215, 215), new Heater(60, 60));
+        var without = new PrinterStatus("printing", 0.42, Details: details with { Tiles = StatusText.DefaultTiles("") });
+        Assert.Equal(["NOZZLE", "BED", "PROGRESS", "LAYER", "TIME LEFT"], StatusText.StatsLabels(without));
+        Assert.Equal(5, StatusText.StatsTiles(without).Length);
+
+        // A fan-controlled chamber: just the temperature (the fan's target isn't something to heat up to).
+        const string fan = "temperature_fan chamber";
+        var with = new PrinterStatus("printing", 0.42, Details: details with
+        {
+            Tiles = StatusText.DefaultTiles(fan),
+            Sensors = new Dictionary<string, Heater> { [fan] = new(46.2, 51, Heats: false) },
+        });
+        Assert.Equal(["NOZZLE", "BED", "CHAMBER", "PROGRESS", "LAYER", "TIME LEFT"], StatusText.StatsLabels(with));
+        Assert.Equal(new StatusText.Tile("46°", ""), StatusText.StatsTiles(with)[2]);
+        Assert.Equal("42%", StatusText.StatsTiles(with)[3].Value);
+    }
+
+    [Fact]
+    public void NoLayerWhilePreparing()
+    {
+        // The start macro moves Z about: working a layer out from it would be nonsense.
+        var status = new PrinterStatus("printing", 0, Details: new PrintDetails(null, null, Z: 25), Preparing: true);
+        Assert.Equal(new StatusText.Tile("—", ""), StatusText.StatsTiles(status)[3]);
+        Assert.Equal(new StatusText.Tile("0%", "Preparing"), StatusText.StatsTiles(status)[2]);
+    }
+
+    [Fact]
+    public void ChosenTilesInTheirOrder()
+    {
+        const string heater = "heater_generic chamber", mcu = "temperature_sensor MCU", coil = "temperature_sensor beacon_coil";
+        var status = new PrinterStatus("printing", 0.5, Details: new PrintDetails(new Heater(215, 215), null, Tool: "T1",
+            Sensors: new Dictionary<string, Heater> { [heater] = new(38, 50), [mcu] = new(41.4, 0, Heats: false) }));
+        string[] tiles = [StatusText.Nozzle, heater, mcu, coil, StatusText.Progress];
+        Assert.Equal(["NOZZLE T1", "CHAMBER", "MCU", "BEACON COIL", "PROGRESS"], StatusText.StatsLabels(status, tiles));
+        Assert.Equal([
+            new StatusText.Tile("215°", "of 215°"),
+            new StatusText.Tile("38°", "of 50°", Highlight: true), // a heated chamber reads like the bed
+            new StatusText.Tile("41°", ""),
+            new StatusText.Tile("—", ""), // chosen, but not reported
+            new StatusText.Tile("50%", "Printing"),
+        ], StatusText.StatsTiles(status, tiles: tiles));
+        Assert.Empty(StatusText.StatsTiles(status, tiles: []));
+    }
+
+    [Theory]
+    [InlineData("extruder,heater_bed,temperature_fan chamber,temperature_sensor MCU", "temperature_fan chamber")]
+    [InlineData("temperature_sensor chamber,heater_generic chamber", "heater_generic chamber")]
+    [InlineData("temperature_sensor chamber_top,temperature_sensor Chamber", "temperature_sensor Chamber")]
+    [InlineData("temperature_sensor chamber_exhaust", "temperature_sensor chamber_exhaust")]
+    [InlineData("extruder,heater_bed,temperature_sensor MCU", "")]
+    public void FindsTheChamberSensor(string sensors, string expected) =>
+        Assert.Equal(expected, MoonrakerBackend.FindChamber(sensors.Split(',')));
+
+    [Fact]
     public void StatsTilesFallBackToZAndBlanks()
     {
         var printing = new PrinterStatus("printing", 0.1, Details: new PrintDetails(null, null, Z: 2.35));
@@ -136,6 +192,81 @@ public class MoonrakerTests
         Assert.Equal(0.25, status.Progress);
         Assert.Equal(1800, status.TimeLeftSeconds);
         Assert.Equal("Slicer", status.EtaSource);
+        Assert.False(status.Preparing);
+    }
+
+    [Fact]
+    public async Task PreparingUntilTheFirstExtrusion()
+    {
+        // Start macro and heat soak: Klipper says printing, but its print clock hasn't started.
+        var http = Stub(path => path switch
+        {
+            var p when p.StartsWith("/printer/objects/query") => """
+                {"result":{"status":{"print_stats":{"state":"printing","filename":"Benchy.gcode","print_duration":0,
+                 "total_duration":240},"virtual_sdcard":{"progress":0.001}}}}
+                """,
+            var p when p.StartsWith("/server/files/metadata") => """{"result":{"estimated_time":2400}}""",
+            _ => null,
+        });
+        var status = await new MoonrakerBackend("p", http: http).GetStatusAsync(default);
+        Assert.Equal("printing", status.State);
+        Assert.True(status.Preparing);
+        Assert.Equal("Preparing to print", StatusText.Lines(status)[0]);
+    }
+
+    [Fact]
+    public async Task FindsAndReadsTheChamberByDefault()
+    {
+        var queries = new List<string>();
+        var http = Stub(path =>
+        {
+            if (!path.StartsWith("/printer/objects/query"))
+                return path.StartsWith("/server/files/metadata") ? """{"result":{}}""" : null;
+            queries.Add(Uri.UnescapeDataString(path));
+            return """
+                {"result":{"status":{"print_stats":{"state":"standby"},
+                 "heaters":{"available_sensors":["extruder","heater_bed","temperature_fan chamber"]},
+                 "temperature_fan chamber":{"temperature":46.02,"target":51.0}}}}
+                """;
+        });
+        var backend = new MoonrakerBackend("p", http: http);
+        await backend.GetStatusAsync(default); // finds it
+        var second = (await backend.GetStatusAsync(default)).Details!; // reads it
+        Assert.Contains("&heaters=available_sensors", queries[0]);
+        Assert.Contains("&temperature_fan chamber=temperature,target", queries[1]);
+        Assert.DoesNotContain("heaters=", queries[1]);
+        Assert.Equal(new Heater(46.02, 51, Heats: false), second.Sensors!["temperature_fan chamber"]);
+        Assert.Equal(StatusText.DefaultTiles("temperature_fan chamber"), second.Tiles);
+    }
+
+    [Fact]
+    public async Task ChosenTilesAskForTheirSensorsOnly()
+    {
+        var queries = new List<string>();
+        var http = Stub(path =>
+        {
+            if (!path.StartsWith("/printer/objects/query"))
+                return null;
+            queries.Add(Uri.UnescapeDataString(path));
+            return """{"result":{"status":{"print_stats":{"state":"standby"},"temperature_sensor MCU":{"temperature":41.4}}}}""";
+        });
+        string[] tiles = ["temperature_sensor MCU", "progress"];
+        var details = (await new MoonrakerBackend("p", http: http, statsTiles: tiles).GetStatusAsync(default)).Details!;
+        Assert.DoesNotContain("heaters=", queries[0]); // no need to look for a chamber
+        Assert.Contains("&temperature_sensor MCU=temperature,target", queries[0]);
+        Assert.Equal(tiles, details.Tiles);
+        Assert.Equal(41.4, details.Sensors!["temperature_sensor MCU"].Temperature);
+    }
+
+    [Fact]
+    public async Task ListsSensorsForSettings()
+    {
+        var http = Stub(path => path.StartsWith("/printer/objects/query?heaters") ? """
+            {"result":{"status":{"heaters":{"available_sensors":
+              ["temperature_sensor beacon_coil","heater_bed","temperature_fan chamber","extruder","extruder1"]}}}}
+            """ : null);
+        Assert.Equal(["temperature_sensor beacon_coil", "temperature_fan chamber"],
+                     await new MoonrakerBackend("p", http: http).GetSensorsAsync(default));
     }
 
     [Fact]
@@ -153,7 +284,8 @@ public class MoonrakerTests
             _ => null,
         });
         var details = (await new MoonrakerBackend("p", http: http).GetStatusAsync(default)).Details!;
-        Assert.Equal(new PrintDetails(new Heater(214.8, 215), new Heater(60.1, 60), 12, 80, 2.6), details);
+        Assert.Equal((new Heater(214.8, 215), new Heater(60.1, 60), 12, 80, 2.6),
+                     (details.Nozzle, details.Bed, details.Layer, details.TotalLayers, details.Z));
     }
 
     [Fact]
@@ -283,6 +415,14 @@ public class BambuTests
                        "subtask_name": "Benchy", "gcode_file": "Benchy.3mf"}}
             """));
         Assert.Equal(new PrinterStatus("printing", 0.42, "Benchy", 63 * 60, "Slicer"), status);
+    }
+
+    [Fact]
+    public void PrepareIsPreparing()
+    {
+        var status = BambuBackend.ParseReport(JsonNode.Parse("""{"print": {"gcode_state": "PREPARE", "mc_percent": 0}}"""));
+        Assert.Equal("printing", status.State);
+        Assert.True(status.Preparing);
     }
 
     [Fact]
@@ -429,5 +569,28 @@ public class IconTests
             using var icon = TrayIconRenderer.DrawIcon(state, 0.5, size);
             Assert.Equal(size, icon.Width);
         }
+    }
+
+    // The top of the ring, where progress starts.
+    private static System.Drawing.Color RingTop(string state, double progress, bool preparing)
+    {
+        using var bitmap = TrayIconRenderer.Draw(state, progress, 64, preparing);
+        return bitmap.GetPixel(32, 7);
+    }
+
+    [Fact]
+    public void AtZeroPercentTheRingIsAFaintGreenTrack()
+    {
+        var top = RingTop("printing", 0, false);
+        Assert.InRange(top.A, 40, 140); // there, but faint
+        Assert.True(top.G > top.R && top.G > top.B); // and green
+    }
+
+    [Fact]
+    public void PreparingIsAWholeGoldRing()
+    {
+        var top = RingTop("printing", 0, true);
+        Assert.Equal(255, top.A);
+        Assert.True(top.R > 200 && top.G > 150 && top.B < 100);
     }
 }

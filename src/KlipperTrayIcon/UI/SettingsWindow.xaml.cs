@@ -21,6 +21,10 @@ public partial class SettingsWindow : Window
     private AppConfig? _reached;
     private bool _filling;
     private readonly int[] _streamRequests = new int[2]; // by CameraView: only the latest answer counts
+    // The stats strip picker: the printer's other sensors (once reached), and whether the user changed
+    // the tiles (if not, the default stays the default, with the chamber if the printer has one).
+    private IReadOnlyList<string> _sensors = [];
+    private bool _tilesChanged;
 
     /// <summary>The saved config, or null if the user cancelled.</summary>
     public AppConfig? Result { get; private set; }
@@ -45,6 +49,9 @@ public partial class SettingsWindow : Window
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
         QueueCheck.IsChecked = config.PrintQueue;
+        // Sensors already chosen stay listed even before the printer answers.
+        _sensors = config.StatsTiles?.Where(StatusText.IsSensorTile).ToList() ?? [];
+        FillStatsPicker(config.StatsTiles ?? StatusText.DefaultTiles(null));
         FillSources(null, config.WebcamName, config.SecondViewName);
         FillStreams(CameraView.Main, null, config.WebcamStream);
         FillStreams(CameraView.Second, null, config.SecondViewStream);
@@ -156,6 +163,8 @@ public partial class SettingsWindow : Window
             config.WebcamStream = Selected(CameraStreamCombo);
             config.SecondViewStream = Selected(SecondViewStreamCombo);
             config.U1Touchscreen = TouchscreenCheck.IsChecked == true;
+            if (_tilesChanged)
+                config.StatsTiles = ChosenTiles();
         }
         else
         {
@@ -202,7 +211,69 @@ public partial class SettingsWindow : Window
             FillSources(webcams, Selected(CameraCombo), Selected(SecondViewCombo));
         }
         catch (Exception) { return; }
-        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckPrintQueueAsync(config));
+        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckPrintQueueAsync(config),
+                           LoadSensorsAsync(config));
+    }
+
+    // ---- stats strip -------------------------------------------------------------
+
+    /// <summary>Lists the printer's other sensors as tiles to pick from; on failure the list stays as it is.</summary>
+    private async Task LoadSensorsAsync(AppConfig config)
+    {
+        IReadOnlyList<string> sensors;
+        try { sensors = await Task.Run(() => PrinterBackends.ListSensorsAsync(config)); }
+        catch (Exception) { return; }
+        var chosen = ChosenTiles();
+        _sensors = sensors.Union(chosen.Where(StatusText.IsSensorTile)).ToList();
+        // Untouched: the default, now that it's known whether there's a chamber.
+        FillStatsPicker(_tilesChanged || _original.StatsTiles != null ? chosen
+                        : StatusText.DefaultTiles(MoonrakerBackend.FindChamber(sensors)));
+    }
+
+    /// <summary>
+    /// A checkbox per tile, in the strip's order: nozzle, bed, the printer's other sensors, then
+    /// progress, layer and time left.
+    /// </summary>
+    private void FillStatsPicker(IEnumerable<string> chosen)
+    {
+        var on = chosen.ToHashSet();
+        StatsPicker.Children.Clear();
+        string[] all = [StatusText.Nozzle, StatusText.Bed, .. _sensors,
+                        StatusText.Progress, StatusText.Layer, StatusText.TimeLeft];
+        foreach (string tile in all)
+        {
+            var box = new CheckBox
+            {
+                Content = TileName(tile), Tag = tile, IsChecked = on.Contains(tile), Margin = new Thickness(0, 0, 16, 6),
+                ToolTip = StatusText.IsSensorTile(tile) ? $"Klipper's [{tile}]" : null,
+            };
+            box.Click += (_, _) => { _tilesChanged = true; UpdateStatsPicker(); };
+            StatsPicker.Children.Add(box);
+        }
+        UpdateStatsPicker();
+    }
+
+    private static string TileName(string tile) => tile switch
+    {
+        StatusText.Nozzle => "Nozzle",
+        StatusText.Bed => "Bed",
+        StatusText.Progress => "Progress",
+        StatusText.Layer => "Layer",
+        StatusText.TimeLeft => "Time left",
+        _ => StatusText.SensorName(tile).Replace('_', ' '),
+    };
+
+    private List<string> ChosenTiles() =>
+        StatsPicker.Children.OfType<CheckBox>().Where(b => b.IsChecked == true).Select(b => (string)b.Tag).ToList();
+
+    /// <summary>At most 6 (there's no room for more): once there are, the rest are greyed out.</summary>
+    private void UpdateStatsPicker()
+    {
+        int count = ChosenTiles().Count;
+        foreach (var box in StatsPicker.Children.OfType<CheckBox>())
+            box.IsEnabled = box.IsChecked == true || count < StatusText.MaxStatsTiles;
+        StatsHint.Text = (count == 0 ? "None: the popup shows no stats strip." : $"{count} of {StatusText.MaxStatsTiles}, shown in this order.")
+                         + (_sensors.Count == 0 ? " Test connection lists the printer's other sensors too." : "");
     }
 
     /// <summary>The queue option only works if the printer's Moonraker has the job queue (it's optional).</summary>

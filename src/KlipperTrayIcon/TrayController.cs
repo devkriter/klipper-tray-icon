@@ -29,7 +29,7 @@ public sealed class TrayController : IDisposable
     // against this, so a brief network drop mid-print doesn't swallow the
     // "print finished" notification.
     private PrinterStatus _lastOnline = PrinterStatus.Connecting;
-    private (string State, double Progress)? _lastDrawn;
+    private (string State, double Progress, bool Preparing)? _lastDrawn;
     private DateTime? _configTime;
     // Released to check the printer right away (the popup's stats strip just opened).
     private readonly SemaphoreSlim _statusWake = new(0);
@@ -242,12 +242,12 @@ public sealed class TrayController : IDisposable
         // Windows caps tray tooltips at 127 characters.
         _icon.Text = StatusText.Shorten(string.Join("\n", StatusText.Lines(status)), 127);
 
-        var drawn = (status.State, Math.Round(status.Progress, 2));
+        var drawn = (status.State, Math.Round(status.Progress, 2), status.Preparing);
         if (drawn != _lastDrawn)
         {
             _lastDrawn = drawn;
             var old = _icon.Icon;
-            _icon.Icon = TrayIconRenderer.DrawIcon(status.State, status.Progress, IconSize);
+            _icon.Icon = TrayIconRenderer.DrawIcon(status.State, status.Progress, IconSize, status.Preparing);
             old?.Dispose();
         }
     }

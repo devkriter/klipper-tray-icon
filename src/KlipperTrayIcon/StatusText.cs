@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using KlipperTrayIcon.Printers;
 
@@ -30,7 +31,7 @@ public static partial class StatusText
         var lines = new List<string>();
         if (s.State is "printing" or "paused")
         {
-            lines.Add($"{label} · {(int)(s.Progress * 100)}%");
+            lines.Add(s.Preparing ? "Preparing to print" : $"{label} · {(int)(s.Progress * 100)}%");
             if (s.State == "printing" && s.TimeLeftSeconds > 0)
             {
                 var eta = (now ?? DateTime.Now).AddSeconds(s.TimeLeftSeconds);
@@ -60,23 +61,66 @@ public static partial class StatusText
     /// <summary>One tile of the stats strip: a big value with a smaller line under it.</summary>
     public sealed record Tile(string Value, string Detail, bool Highlight = false);
 
-    /// <summary>Nozzle, bed, progress, layer and time-left tiles; "—" for anything unknown.</summary>
-    public static Tile[] StatsTiles(PrinterStatus s, DateTime? now = null)
+    // ---- stats strip ---------------------------------------------------------------
+
+    public const int MaxStatsTiles = 6;
+    public const string Nozzle = "nozzle", Bed = "bed", Progress = "progress", Layer = "layer", TimeLeft = "time_left";
+
+    /// <summary>Nozzle, bed, the chamber if the printer has a sensor for it, then progress, layer and time left.</summary>
+    public static IReadOnlyList<string> DefaultTiles(string? chamber) =>
+        string.IsNullOrEmpty(chamber) ? [Nozzle, Bed, Progress, Layer, TimeLeft] : [Nozzle, Bed, chamber, Progress, Layer, TimeLeft];
+
+    /// <summary>A Klipper sensor ("temperature_fan chamber"), as opposed to a built-in tile; nozzles and the bed have their own.</summary>
+    public static bool IsSensorTile(string tile) =>
+        tile.Contains(' ') && !tile.StartsWith("extruder") && tile != "heater_bed";
+
+    /// <summary>"chamber" for "temperature_fan chamber".</summary>
+    public static string SensorName(string tile) => tile[(tile.IndexOf(' ') + 1)..];
+
+    /// <summary>The tile's label in the strip: "NOZZLE", "TIME LEFT", "CHAMBER", "BEACON COIL".</summary>
+    public static string TileLabel(string tile) => tile switch
     {
+        Nozzle => "NOZZLE",
+        Bed => "BED",
+        Progress => "PROGRESS",
+        Layer => "LAYER",
+        TimeLeft => "TIME LEFT",
+        _ => SensorName(tile).Replace('_', ' ').ToUpperInvariant(),
+    };
+
+    /// <summary>The labels for StatsTiles' tiles.</summary>
+    public static string[] StatsLabels(PrinterStatus s, IReadOnlyList<string>? tiles = null)
+    {
+        tiles ??= s.Details?.Tiles ?? DefaultTiles(null);
+        // Printers with several extruders: which one the nozzle tile shows, e.g. "NOZZLE T2".
+        string? tool = s.State == "offline" ? null : s.Details?.Tool;
+        return tiles.Select(t => t == Nozzle && tool != null ? $"NOZZLE {tool}" : TileLabel(t)).ToArray();
+    }
+
+    /// <summary>
+    /// The stats strip: by default nozzle, bed, (chamber,) progress, layer and time left, or the
+    /// tiles chosen in Settings. "—" for anything the printer doesn't report.
+    /// </summary>
+    public static Tile[] StatsTiles(PrinterStatus s, DateTime? now = null, IReadOnlyList<string>? tiles = null)
+    {
+        tiles ??= s.Details?.Tiles ?? DefaultTiles(null);
         const string none = "—";
         var d = s.State == "offline" ? null : s.Details;
         bool active = s.State is "printing" or "paused";
 
         Tile Heater(Heater? h) => h == null ? new(none, "")
+            : !h.Heats
+                // A plain sensor, or a fan's: no target to heat up to.
+                ? new($"{h.Temperature:0}°", "")
             : h.Target > 0
                 // Highlighted while it's still heating up.
                 ? new($"{h.Temperature:0}°", $"of {h.Target:0}°", h.Temperature < h.Target - 2)
                 : new($"{h.Temperature:0}°", "off");
 
-        var progress = active || s.State == "complete" ? new Tile($"{(int)(s.Progress * 100)}%", Label(s.State)) : new Tile(none, Label(s.State));
+        var progress = active || s.State == "complete" ? new Tile($"{(int)(s.Progress * 100)}%", s.Preparing ? "Preparing" : Label(s.State)) : new Tile(none, Label(s.State));
 
         Tile layer = new(none, "");
-        if (active && d != null)
+        if (active && d != null && !s.Preparing) // while preparing, Z is wherever the start macro left it
         {
             if (d.Layer is int current)
                 layer = new(current.ToString(), d.TotalLayers is int total ? $"of {total}" : "");
@@ -94,7 +138,15 @@ public static partial class StatusText
         else if (s.State == "paused")
             time = new(none, "paused");
 
-        return [Heater(d?.Nozzle), Heater(d?.Bed), progress, layer, time];
+        return tiles.Select(t => t switch
+        {
+            Nozzle => Heater(d?.Nozzle),
+            Bed => Heater(d?.Bed),
+            Progress => progress,
+            Layer => layer,
+            TimeLeft => time,
+            _ => Heater(d?.Sensors?.GetValueOrDefault(t)),
+        }).ToArray();
     }
 
     /// <summary>Keeps the end of the text (file names differ at the end).</summary>

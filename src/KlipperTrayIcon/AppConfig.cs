@@ -30,6 +30,10 @@ public sealed class AppConfig
     [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
     /// <summary>Show the print queue in the popup (Klipper / U1; can start prints, so off by default).</summary>
     [JsonPropertyName("print_queue")] public bool PrintQueue { get; set; }
+    // The stats strip's tiles, up to 6: "nozzle", "bed", "progress", "layer", "time_left" and
+    // Klipper sensors by name ("temperature_fan chamber"). Null: the default, with a chamber
+    // sensor if the printer has one.
+    [JsonPropertyName("stats_tiles")] public List<string>? StatsTiles { get; set; }
     /// <summary>Snapmaker U1: show its touchscreen (Remote Screen) in the popup, and send it taps.</summary>
     [JsonPropertyName("u1_touchscreen")] public bool U1Touchscreen { get; set; } = true;
 

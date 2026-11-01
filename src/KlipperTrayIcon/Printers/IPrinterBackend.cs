@@ -82,10 +82,11 @@ public static class PrinterBackends
                 // Klipper, plus the touchscreen as the second view (instead of a second camera).
                 ? new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
                                        webcamName: config.WebcamName, webcamStream: config.WebcamStream,
-                                       remoteScreen: config.U1Touchscreen)
+                                       remoteScreen: config.U1Touchscreen, statsTiles: config.StatsTiles)
                 : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
                                        webcamName: config.WebcamName, secondViewName: config.SecondViewName,
-                                       webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream);
+                                       webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream,
+                                       statsTiles: config.StatsTiles);
 
     /// <summary>Whether the printer has a print queue, for the settings window. Throws if it can't be reached.</summary>
     public static async Task<bool> HasPrintQueueAsync(AppConfig config, CancellationToken ct = default)
@@ -94,6 +95,15 @@ public static class PrinterBackends
             return false;
         using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
         return await backend.HasJobQueueAsync(ct);
+    }
+
+    /// <summary>The printer's temperature sensors besides nozzles and bed, for the settings window. Throws if it can't be reached.</summary>
+    public static async Task<IReadOnlyList<string>> ListSensorsAsync(AppConfig config, CancellationToken ct = default)
+    {
+        if (config.IsBambu)
+            return [];
+        using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
+        return await backend.GetSensorsAsync(ct);
     }
 
     /// <summary>The printer's cameras, for the settings window. Throws if it can't be reached.</summary>

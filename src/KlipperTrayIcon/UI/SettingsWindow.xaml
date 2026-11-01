@@ -93,6 +93,8 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Text="Address" Style="{StaticResource FieldLabel}" />
@@ -161,6 +163,12 @@
             <CheckBox x:Name="QueueCheck" Grid.Row="8" Grid.ColumnSpan="3" Margin="0,0,0,8"
                       Content="Show the print queue in the webcam popup"
                       ToolTip="Queued jobs with drag-to-reorder, recent uploads to add, and a button that starts the next print." />
+
+            <!-- The stats strip at the top of the popup's side panel: up to 6 tiles, in this order. -->
+            <TextBlock Grid.Row="9" Text="Stats strip" Style="{StaticResource FieldLabel}" VerticalAlignment="Top"
+                       Margin="0,4,16,0" />
+            <WrapPanel x:Name="StatsPicker" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0" />
+            <TextBlock x:Name="StatsHint" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" />
         </Grid>
 
         <!-- Bambu -->

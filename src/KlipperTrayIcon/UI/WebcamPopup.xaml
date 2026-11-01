@@ -259,10 +259,18 @@
                     <Button Content="&#x2715;" FontSize="11"
                             Style="{StaticResource CloseButton}" Click="OnCloseClick" />
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,8,0">
+                <!-- A grid, not a StackPanel, so a long file name is trimmed rather than run under the buttons. -->
+                <Grid VerticalAlignment="Center" Margin="10,0,8,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition />
+                    </Grid.ColumnDefinitions>
                     <Ellipse x:Name="StateDot" Width="8" Height="8" Fill="#808080" Margin="0,1,8,0" />
-                    <TextBlock x:Name="TitleText" Foreground="#D8D8D8" FontSize="12" TextTrimming="CharacterEllipsis" />
-                </StackPanel>
+                    <TextBlock x:Name="TitleText" Grid.Column="1" Foreground="#D8D8D8" FontSize="12" />
+                    <TextBlock x:Name="TitleFile" Grid.Column="2" Foreground="#9A9A9A" FontSize="12"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
             </DockPanel>
         </Border>
 
@@ -303,7 +311,7 @@
                     BorderBrush="#404040" BorderThickness="1,0,0,0" Visibility="Collapsed">
                 <DockPanel>
                     <!-- Key stats, fed by the tray's status updates. -->
-                    <Border DockPanel.Dock="Top" Background="#1C1C1C" BorderBrush="#404040" BorderThickness="0,0,0,1">
+                    <Border x:Name="StatsStrip" DockPanel.Dock="Top" Background="#1C1C1C" BorderBrush="#404040" BorderThickness="0,0,0,1">
                         <Grid>
                             <ItemsControl x:Name="StatsList" Margin="6,8,62,9">
                                 <ItemsControl.ItemsPanel>
@@ -312,14 +320,19 @@
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
+                                    <!-- With six tiles a long value ("1h 34m") can be a little too wide: it
+                                         shrinks to fit rather than being cut off. -->
                                     <DataTemplate>
-                                        <StackPanel Margin="6,0">
+                                        <StackPanel Margin="5,0">
                                             <TextBlock Text="{Binding Label}" Foreground="#9A9A9A" FontSize="10"
-                                                       FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding Value}" Foreground="{Binding Brush}" FontSize="17"
-                                                       FontWeight="SemiBold" Margin="0,1,0,0" />
-                                            <TextBlock Text="{Binding Detail}" Foreground="#A0A0A0" FontSize="11"
-                                                       TextTrimming="CharacterEllipsis" />
+                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Left" Margin="0,1,0,0">
+                                                <TextBlock Text="{Binding Value}" Foreground="{Binding Brush}" FontSize="17"
+                                                           FontWeight="SemiBold" />
+                                            </Viewbox>
+                                            <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                                <TextBlock Text="{Binding Detail}" Foreground="#A0A0A0" FontSize="11" />
+                                            </Viewbox>
                                         </StackPanel>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>

@@ -8,7 +8,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
 ## Features
 
 - **Dynamic Tray Icon**: visualizes print progress as a circular ring.
-  - 🟢 **Green Ring**: Printing
+  - 🟡 **Gold Ring**: Preparing to print (start macro, heating, heat soak: before the first extrusion)
+  - 🟢 **Green Ring**: Printing (fills a faint green track, so it's visible at 0%)
   - 🟠 **Orange Ring**: Paused
   - 🔵 **Blue Ring**: Complete
   - 🔴 **Red Ring**: Printer error
@@ -26,8 +27,10 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   queued yet, with *Load more* for older files), and a small *Start next* button that asks for a
   second click. Off by default; turn it on in Settings.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
-  video, under a strip of key stats (nozzle and bed temperature, progress, layer, time left). It
-  can be turned off in Settings.
+  video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
+  sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
+  including any of the printer's other temperature sensors. The console can be turned off in
+  Settings.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Settings window**: switch printers, test the connection, change the refresh rate, and turn
   notifications and *Start with Windows* on or off. Changes apply immediately.
@@ -164,6 +167,7 @@ For Klipper/Moonraker (see `config.example.json`):
     "moonraker_api_key": "",
     "webcam_console": true,
     "print_queue": false,
+    "stats_tiles": null,
     "webcam_name": "",
     "webcam_stream": "",
     "second_view_name": "",

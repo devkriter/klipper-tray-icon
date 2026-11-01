@@ -357,7 +357,8 @@ public partial class WebcamPopup : Window
 
     // ---- stats strip ---------------------------------------------------------------
 
-    private static readonly string[] StatLabels = ["NOZZLE", "BED", "PROGRESS", "LAYER", "TIME LEFT"];
+    // The strip's tiles, kept while the printer is offline so they don't change then.
+    private IReadOnlyList<string>? _statsTiles;
 
     /// <summary>True when the popup shows the stats strip (it tops the side panel: console and/or queue).</summary>
     public bool HasStats => _showPanel;
@@ -365,23 +366,26 @@ public partial class WebcamPopup : Window
     /// <summary>Latest printer status, for the stats strip above the console (UI thread).</summary>
     public void ShowStatus(PrinterStatus status)
     {
-        // Title bar: printer and what it's doing, e.g. "voron · Printing · 42%".
+        // Title bar: printer and what it's doing, e.g. "voron · Printing · 42%", then the file
+        // being printed, dimmer (and trimmed first when the window is narrow).
         string headline = StatusText.Lines(status)[0];
         TitleText.Text = $"{_backend.DisplayName} · {headline}";
-        Title = TitleText.Text; // the taskbar button, when pinned
-        StateDot.Fill = StateBrush(status.State);
+        string file = status.State is "printing" or "paused" && status.Filename.Length > 0 ? DisplayName(status.Filename) : "";
+        TitleFile.Text = file.Length > 0 ? " · " + file : "";
+        Title = TitleText.Text + TitleFile.Text; // the taskbar button, when pinned
+        StateDot.Fill = status.Preparing ? PreparingDot : StateBrush(status.State);
         QueueSawStatus(status);
         if (!_showPanel)
             return;
-        var tiles = StatusText.StatsTiles(status);
+        _statsTiles = status.Details?.Tiles ?? _statsTiles;
+        var tiles = StatusText.StatsTiles(status, tiles: _statsTiles);
+        var labels = StatusText.StatsLabels(status, _statsTiles);
+        // None chosen in Settings: no strip.
+        StatsStrip.Visibility = tiles.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         var items = new StatTile[tiles.Length];
         for (int i = 0; i < tiles.Length; i++)
-        {
-            // Printers with several extruders: which one the nozzle tile shows, e.g. "NOZZLE T2".
-            string label = i == 0 && status.Details?.Tool is string tool ? $"{StatLabels[i]} {tool}" : StatLabels[i];
-            items[i] = new StatTile(label, tiles[i].Value, tiles[i].Detail,
+            items[i] = new StatTile(labels[i], tiles[i].Value, tiles[i].Detail,
                                     tiles[i].Highlight ? ConsoleLine.TemperatureBrush : ConsoleLine.ResponseBrush);
-        }
         StatsList.ItemsSource = items;
         bool showProgress = status.State is "printing" or "paused" or "complete";
         ProgressScale.ScaleX = showProgress ? Math.Clamp(status.Progress, 0, 1) : 0;
@@ -391,7 +395,8 @@ public partial class WebcamPopup : Window
     private static readonly Brush ProgressFill = Frozen(Color.FromRgb(0x3F, 0xB9, 0x50));
     private static readonly Brush ErrorDot = Frozen(Color.FromRgb(0xF8, 0x51, 0x49)),
                                   DoneDot = Frozen(Color.FromRgb(0x58, 0xA6, 0xFF)),
-                                  IdleDot = Frozen(Color.FromRgb(0x80, 0x80, 0x80));
+                                  IdleDot = Frozen(Color.FromRgb(0x80, 0x80, 0x80)),
+                                  PreparingDot = Frozen(Color.FromRgb(0xFF, 0xC8, 0x28)); // the tray icon's gold
 
     private static Brush StateBrush(string state) => state switch
     {

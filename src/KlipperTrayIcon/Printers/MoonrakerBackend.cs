@@ -27,6 +27,12 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
     // The extruder in use ("extruder", "extruder1", ...), from the last poll: on
     // toolchangers (Snapmaker U1) and IDEX printers the nozzle tile follows it.
     private string _activeExtruder = "extruder";
+    // The stats strip's tiles as configured; null for the default, which has the chamber's sensor
+    // (e.g. "temperature_fan chamber") if there is one: null until looked for, "" if there's none.
+    private readonly IReadOnlyList<string>? _statsTiles;
+    private string? _chamber;
+
+    private IReadOnlyList<string> Tiles => _statsTiles ?? StatusText.DefaultTiles(_chamber);
     private bool _multiTool;
     private readonly string _webcamName, _secondViewName;
     private readonly StreamKind?[] _preferredStream = new StreamKind?[2]; // by CameraView; null: automatic
@@ -34,8 +40,10 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
 
     public MoonrakerBackend(string moonrakerUrl, string apiKey = "", HttpClient? http = null,
                             string webcamName = "", string secondViewName = "",
-                            string webcamStream = "", string secondViewStream = "", bool remoteScreen = false)
+                            string webcamStream = "", string secondViewStream = "", bool remoteScreen = false,
+                            IReadOnlyList<string>? statsTiles = null)
     {
+        _statsTiles = statsTiles;
         BaseUrl = NormalizeUrl(moonrakerUrl);
         ApiKey = (apiKey ?? "").Trim();
         // Only needed when Moonraker doesn't already trust this PC's address
@@ -122,10 +130,16 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
             using var doc = await GetJsonAsync(
                 "/printer/objects/query?print_stats&display_status&virtual_sdcard" +
                 $"&{_activeExtruder}=temperature,target&toolhead=extruder" +
-                "&heater_bed=temperature,target&gcode_move=gcode_position",
+                "&heater_bed=temperature,target&gcode_move=gcode_position" +
+                (_statsTiles == null && _chamber == null ? "&heaters=available_sensors" : "") +
+                string.Concat(Tiles.Where(StatusText.IsSensorTile).Select(t => $"&{Uri.EscapeDataString(t)}=temperature,target")),
                 TimeSpan.FromSeconds(2), ct);
             var status = doc.RootElement.Prop("result").Prop("status");
             var printStats = status.Prop("print_stats");
+            // Look once, when Klipper lists its sensors (not while it's still starting up).
+            if (_statsTiles == null && _chamber == null
+                && status.Prop("heaters").Prop("available_sensors") is { ValueKind: JsonValueKind.Array } sensors)
+                _chamber = FindChamber(sensors.EnumerateArray().Select(e => e.GetString() ?? ""));
 
             string state = printStats.Str("state", "standby");
             // virtual_sdcard progress is usually the more accurate one.
@@ -183,8 +197,11 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
                 }
                 catch (Exception) when (!ct.IsCancellationRequested) { } // keep showing the address
             }
+            // Klipper starts the print_duration clock at the first extrusion, so until then the
+            // printer is still running the start routine (start macro, heating, heat soak).
+            bool preparing = state == "printing" && printDuration <= 0;
             return new PrinterStatus(state, progress, filename, timeLeft, etaSource,
-                                     Details: ReadDetails(status, state, _fileInfo));
+                                     Details: ReadDetails(status, state, _fileInfo), Preparing: preparing);
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
@@ -219,7 +236,45 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
             if (layer != null && total != null)
                 layer = Math.Min(layer.Value, total.Value);
         }
-        return new PrintDetails(ReadHeater(status.Prop(asked)), ReadHeater(status.Prop("heater_bed")), layer, total, z, tool);
+        var tiles = Tiles;
+        var sensors = new Dictionary<string, Heater>();
+        foreach (string name in tiles.Where(StatusText.IsSensorTile))
+            if (status.Prop(name) is { ValueKind: JsonValueKind.Object } sensor)
+                // Only a heater has a target to heat up to (a temperature_fan's is when to cool).
+                sensors[name] = new Heater(sensor.Num("temperature"), sensor.Num("target"), Heats: name.StartsWith("heater_generic "));
+        return new PrintDetails(ReadHeater(status.Prop(asked)), ReadHeater(status.Prop("heater_bed")), layer, total, z, tool,
+                                sensors, tiles);
+    }
+
+    /// <summary>
+    /// Klipper's temperature sensors other than the nozzles and bed (which have their own tiles),
+    /// e.g. "temperature_fan chamber", "temperature_sensor MCU". Throws if unreachable.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetSensorsAsync(CancellationToken ct)
+    {
+        using var doc = await GetJsonAsync("/printer/objects/query?heaters=available_sensors", TimeSpan.FromSeconds(3), ct);
+        var sensors = doc.RootElement.Prop("result").Prop("status").Prop("heaters").Prop("available_sensors");
+        return sensors.ValueKind != JsonValueKind.Array ? []
+            : sensors.EnumerateArray().Select(e => e.GetString() ?? "").Where(StatusText.IsSensorTile).ToList();
+    }
+
+    /// <summary>
+    /// The chamber's sensor among Klipper's temperature sensors: one named "chamber" (any kind:
+    /// heater_generic, temperature_fan, temperature_sensor), else the first with "chamber" in its
+    /// name; heaters before fans before plain sensors. "" when there's none.
+    /// </summary>
+    public static string FindChamber(IEnumerable<string> sensors)
+    {
+        var named = sensors
+            .Select(full => (Full: full, Name: full.Contains(' ') ? full[(full.IndexOf(' ') + 1)..] : full))
+            .Where(s => s.Name.Contains("chamber", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        int Kind(string full) => full.StartsWith("heater_generic ") ? 0 : full.StartsWith("temperature_fan ") ? 1 : 2;
+        return named
+            .OrderBy(s => s.Name.Equals("chamber", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(s => Kind(s.Full))
+            .Select(s => s.Full)
+            .FirstOrDefault() ?? "";
     }
 
     private static int? Positive(double? value) => value > 0 ? (int)value : null;

@@ -1,9 +1,12 @@
+using System.Collections.Generic;
+
 namespace KlipperTrayIcon.Printers;
 
 /// <summary>
 /// State is one of: printing, paused, complete, cancelled, error (the printer
 /// reports a fault), standby, or offline (we can't talk to the printer -
-/// Message says why).
+/// Message says why). Preparing: printing, but still in the start routine
+/// (start macro, heating, heat soak), before the first extrusion.
 /// </summary>
 public sealed record PrinterStatus(
     string State,
@@ -12,7 +15,8 @@ public sealed record PrinterStatus(
     double TimeLeftSeconds = 0,
     string EtaSource = "Calc",
     string Message = "",
-    PrintDetails? Details = null)
+    PrintDetails? Details = null,
+    bool Preparing = false)
 {
     public static PrinterStatus Connecting { get; } = new("standby", 0, Message: "Connecting...");
 
@@ -30,10 +34,12 @@ public sealed record PrintDetails(
     int? Layer = null,
     int? TotalLayers = null,
     double Z = 0,
-    string? Tool = null); // "T2" on printers with several extruders
+    string? Tool = null, // "T2" on printers with several extruders
+    IReadOnlyDictionary<string, Heater>? Sensors = null, // other sensors shown, by Klipper name ("temperature_fan chamber")
+    IReadOnlyList<string>? Tiles = null); // the stats strip's tiles (see StatusText.StatsTiles)
 
-/// <summary>Target 0 means the heater is off.</summary>
-public sealed record Heater(double Temperature, double Target);
+/// <summary>Target 0 means the heater is off. Heats is false for a plain sensor (or a fan's), which has no target to reach.</summary>
+public sealed record Heater(double Temperature, double Target, bool Heats = true);
 
 /// <summary>One line of the Klipper console (Moonraker's gcode store).</summary>
 public sealed record ConsoleEntry(string Message, double Time, string Type);

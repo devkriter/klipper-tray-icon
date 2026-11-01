@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.8.0] - 2026-10-31
+### Added
+- Preparing to print: from the start of a print until its first extrusion (start macro, heating,
+  heat soak) the tray icon is a gold ring and the status reads "Preparing to print". Klipper
+  doesn't start its print clock until the first extrusion, which is how it's detected; Bambu
+  reports it as PREPARE.
+- While printing, the progress fills a faint green track, so the icon doesn't vanish at 0%.
+- Chamber temperature in the popup's stats strip, on printers with a chamber sensor (Klipper's
+  `heater_generic`, `temperature_fan` or `temperature_sensor` named "chamber", or with "chamber"
+  in its name). A heated chamber shows its target like the bed; a sensor or fan just the
+  temperature.
+- Settings › Stats strip: choose up to 6 tiles for the strip: nozzle, bed, progress, layer, time
+  left and any of the printer's temperature sensors (MCU, host, chamber…), shown in that order.
+  Untouched, it's nozzle, bed, chamber (if there is one), progress, layer and time left; with
+  none chosen, there's no strip. Config key: `stats_tiles`.
+- The webcam popup's title bar names the file being printed, after the progress
+  ("mikron · Printing · 42% · Benchy"). It's dimmer, and trimmed first when the window is narrow.
+
+### Changed
+- Stats strip: a value too wide for its tile (six tiles, "1h 34m") shrinks to fit rather than
+  being cut off; the layer shows "—" while a print is preparing.
+
 ## [2.7.2] - 2026-10-31
 ### Changed
 - Print queue: recent uploads leave out files that are already queued. Adding one moves it up into

@@ -49,15 +49,15 @@ public class StatusTextTests
         Assert.Equal(["NOZZLE", "BED", "PROGRESS", "LAYER", "TIME LEFT"], StatusText.StatsLabels(without));
         Assert.Equal(5, StatusText.StatsTiles(without).Length);
 
-        // A fan-controlled chamber: just the temperature (the fan's target isn't something to heat up to).
+        // A fan-controlled chamber shows its target like the bed.
         const string fan = "temperature_fan chamber";
         var with = new PrinterStatus("printing", 0.42, Details: details with
         {
             Tiles = StatusText.DefaultTiles(fan),
-            Sensors = new Dictionary<string, Heater> { [fan] = new(46.2, 51, Heats: false) },
+            Sensors = new Dictionary<string, Heater> { [fan] = new(50.2, 51) },
         });
         Assert.Equal(["NOZZLE", "BED", "CHAMBER", "PROGRESS", "LAYER", "TIME LEFT"], StatusText.StatsLabels(with));
-        Assert.Equal(new StatusText.Tile("46°", ""), StatusText.StatsTiles(with)[2]);
+        Assert.Equal(new StatusText.Tile("50°", "of 51°"), StatusText.StatsTiles(with)[2]);
         Assert.Equal("42%", StatusText.StatsTiles(with)[3].Value);
     }
 
@@ -235,7 +235,7 @@ public class MoonrakerTests
         Assert.Contains("&heaters=available_sensors", queries[0]);
         Assert.Contains("&temperature_fan chamber=temperature,target", queries[1]);
         Assert.DoesNotContain("heaters=", queries[1]);
-        Assert.Equal(new Heater(46.02, 51, Heats: false), second.Sensors!["temperature_fan chamber"]);
+        Assert.Equal(new Heater(46.02, 51), second.Sensors!["temperature_fan chamber"]);
         Assert.Equal(StatusText.DefaultTiles("temperature_fan chamber"), second.Tiles);
     }
 

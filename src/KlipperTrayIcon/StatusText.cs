@@ -110,7 +110,7 @@ public static partial class StatusText
 
         Tile Heater(Heater? h) => h == null ? new(none, "")
             : !h.Heats
-                // A plain sensor, or a fan's: no target to heat up to.
+                // A plain sensor: no target.
                 ? new($"{h.Temperature:0}°", "")
             : h.Target > 0
                 // Highlighted while it's still heating up.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.1] - 2026-10-31
+### Changed
+- Settings: the API key (and Bambu access code) has an eye inside its field to show or hide it,
+  and *Test connection* sits right beside it; the test's result replaces the hint underneath.
+  One row fewer.
+- Stats strip: a chamber controlled by a `temperature_fan` shows its target ("of 51°") like the
+  nozzle and bed, highlighted while it's still well below it.
+
 ## [2.9.0] - 2026-10-31
 ### Changed
 - Settings › Stats strip is drawn as the strip itself: six slots, left to right, with the labels

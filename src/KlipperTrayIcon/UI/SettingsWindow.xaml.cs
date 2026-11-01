@@ -92,7 +92,7 @@ public partial class SettingsWindow : Window
             ? "The printer's address, e.g. 192.168.1.60"
             : "The address you open Mainsail or Fluidd at, e.g. mainsail.local or 192.168.1.50";
         UpdateSourcesHint();
-        TestResult.Text = "";
+        ShowTestResult(null);
     }
 
     private void UpdateSourcesHint()
@@ -116,6 +116,29 @@ public partial class SettingsWindow : Window
         ToggleSecret(ShowCode.IsChecked == true, CodeHidden, CodeVisible);
 
     /// <summary>PasswordBox can't reveal its text, so swap it for a TextBox.</summary>
+    /// <summary>
+    /// The eye sits where a text box puts its ✕ (clear) button while typing: a secret doesn't
+    /// need one, so the revealed box goes without.
+    /// </summary>
+    private static void HideClearButton(TextBox box)
+    {
+        box.ApplyTemplate();
+        box.UpdateLayout();
+        foreach (var button in Descendants(box).OfType<System.Windows.Controls.Primitives.ButtonBase>())
+            button.Visibility = Visibility.Collapsed;
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var deeper in Descendants(child))
+                yield return deeper;
+        }
+    }
+
     private static void ToggleSecret(bool show, PasswordBox hidden, TextBox visible)
     {
         if (show)
@@ -123,6 +146,7 @@ public partial class SettingsWindow : Window
             visible.Text = hidden.Password;
             hidden.Visibility = Visibility.Collapsed;
             visible.Visibility = Visibility.Visible;
+            HideClearButton(visible);
         }
         else
         {
@@ -469,16 +493,33 @@ public partial class SettingsWindow : Window
         if (_testing || Collect() is not { } config)
             return;
         _testing = true;
-        TestButton.IsEnabled = false;
-        TestResult.ClearValue(TextBlock.ForegroundProperty);
-        TestResult.Text = "Testing…";
+        var button = (Button)sender;
+        button.IsEnabled = false;
+        ShowTestResult("Testing…");
         var (ok, message) = await Task.Run(() => PrinterBackends.TestConnectionAsync(config));
-        TestResult.Text = (ok ? "✔ " : "✖ ") + message;
-        TestResult.Foreground = new SolidColorBrush(ok ? Color.FromRgb(0x2E, 0x9E, 0x4F) : Color.FromRgb(0xD1, 0x34, 0x38));
+        ShowTestResult((ok ? "✔ " : "✖ ") + message,
+                       new SolidColorBrush(ok ? Color.FromRgb(0x2E, 0x9E, 0x4F) : Color.FromRgb(0xD1, 0x34, 0x38)));
         if (ok && !config.IsBambu)
             await LoadSourcesAsync(config);
-        TestButton.IsEnabled = true;
+        button.IsEnabled = true;
         _testing = false;
+    }
+
+    /// <summary>The test's result, in place of the hint under the field (null: the hint again).</summary>
+    private void ShowTestResult(string? text, Brush? color = null)
+    {
+        var (result, hint) = IsBambu ? (BambuTestResult, BambuHint) : (TestResult, ApiKeyHint);
+        foreach (var other in new[] { TestResult, BambuTestResult })
+            if (other != result)
+                other.Visibility = Visibility.Collapsed;
+        ApiKeyHint.Visibility = BambuHint.Visibility = Visibility.Visible;
+        result.Text = text ?? "";
+        if (color != null)
+            result.Foreground = color;
+        else
+            result.ClearValue(TextBlock.ForegroundProperty);
+        result.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        hint.Visibility = text == null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>IsCancel only closes a dialog (first run); from the tray menu the window isn't one.</summary>

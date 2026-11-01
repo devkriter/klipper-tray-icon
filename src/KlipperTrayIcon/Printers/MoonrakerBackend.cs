@@ -240,8 +240,9 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
         var sensors = new Dictionary<string, Heater>();
         foreach (string name in tiles.Where(StatusText.IsSensorTile))
             if (status.Prop(name) is { ValueKind: JsonValueKind.Object } sensor)
-                // Only a heater has a target to heat up to (a temperature_fan's is when to cool).
-                sensors[name] = new Heater(sensor.Num("temperature"), sensor.Num("target"), Heats: name.StartsWith("heater_generic "));
+                // Heaters and temperature fans have a target, shown like the bed's; a plain sensor doesn't.
+                sensors[name] = new Heater(sensor.Num("temperature"), sensor.Num("target"),
+                                           Heats: name.StartsWith("heater_generic ") || name.StartsWith("temperature_fan "));
         return new PrintDetails(ReadHeater(status.Prop(asked)), ReadHeater(status.Prop("heater_bed")), layer, total, z, tool,
                                 sensors, tiles);
     }

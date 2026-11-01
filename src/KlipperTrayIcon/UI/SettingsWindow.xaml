@@ -92,6 +92,40 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- The eye inside a secret's field: shows or hides what's typed. -->
+        <Style x:Key="EyeToggle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Margin" Value="0,0,3,0" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            <Setter Property="ToolTip" Value="Show" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bg" Background="Transparent" CornerRadius="3" Margin="0,4">
+                            <TextBlock x:Name="Icon" Text="&#xE890;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="14"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Icon" Property="Text" Value="&#xED1A;" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="ToolTip" Value="Hide" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <StackPanel Margin="28,22,28,24">
@@ -156,13 +190,18 @@
                 </TextBlock>
             </StackPanel>
             <Grid Grid.Row="2" Grid.Column="1">
-                <PasswordBox x:Name="ApiKeyHidden" />
-                <TextBox x:Name="ApiKeyVisible" Visibility="Collapsed" />
+                <PasswordBox x:Name="ApiKeyHidden" Padding="10,5,36,6" />
+                <TextBox x:Name="ApiKeyVisible" Padding="10,5,36,6" Visibility="Collapsed" />
+                <ToggleButton x:Name="ShowApiKey" Style="{StaticResource EyeToggle}"
+                              Checked="OnShowApiKeyChanged" Unchecked="OnShowApiKeyChanged" />
             </Grid>
-            <CheckBox x:Name="ShowApiKey" Grid.Row="2" Grid.Column="2" Content="Show" Margin="12,0,0,0"
-                      Checked="OnShowApiKeyChanged" Unchecked="OnShowApiKeyChanged" />
-            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+            <Button x:Name="TestButton" Grid.Row="2" Grid.Column="2" Content="Test connection" Margin="8,0,0,0"
+                    Click="OnTestClick" />
+            <!-- The test's result takes the hint's place. -->
+            <TextBlock x:Name="ApiKeyHint" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="Optional — leave blank unless Moonraker asks for one." />
+            <TextBlock x:Name="TestResult" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Opacity="1" Visibility="Collapsed" />
 
             <!-- Filled from the printer's webcam list once it's been reached. -->
         </Grid>
@@ -188,22 +227,22 @@
                      CharacterCasing="Upper" />
             <TextBlock Grid.Row="2" Text="Access code" Style="{StaticResource FieldLabel}" />
             <Grid Grid.Row="2" Grid.Column="1">
-                <PasswordBox x:Name="CodeHidden" />
-                <TextBox x:Name="CodeVisible" Visibility="Collapsed" />
+                <PasswordBox x:Name="CodeHidden" Padding="10,5,36,6" />
+                <TextBox x:Name="CodeVisible" Padding="10,5,36,6" Visibility="Collapsed" />
+                <ToggleButton x:Name="ShowCode" Style="{StaticResource EyeToggle}"
+                              Checked="OnShowCodeChanged" Unchecked="OnShowCodeChanged" />
             </Grid>
-            <CheckBox x:Name="ShowCode" Grid.Row="2" Grid.Column="2" Content="Show" Margin="12,0,0,0"
-                      Checked="OnShowCodeChanged" Unchecked="OnShowCodeChanged" />
-            <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+            <Button x:Name="BambuTestButton" Grid.Row="2" Grid.Column="2" Content="Test connection" Margin="8,0,0,0"
+                    Click="OnTestClick" />
+            <TextBlock x:Name="BambuTestResult" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Opacity="1" Visibility="Collapsed" />
+            <TextBlock x:Name="BambuHint" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        Text="All three are on the printer's screen under Settings → WLAN / Network. For the camera, turn on “LAN Mode Live View”. LAN Only Mode is not required." />
         </Grid>
 
-        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-            <Button x:Name="TestButton" Content="Test connection" Click="OnTestClick" />
-            <TextBlock x:Name="TestResult" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap" MaxWidth="380" />
-        </StackPanel>
 
         <!-- Klipper: what the popup shows, below the connection test. -->
-        <Grid x:Name="KlipperOptions" Margin="0,18,0,0">
+        <Grid x:Name="KlipperOptions" Margin="0,4,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="120" />
                 <ColumnDefinition />

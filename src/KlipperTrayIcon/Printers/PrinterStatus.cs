@@ -38,7 +38,7 @@ public sealed record PrintDetails(
     IReadOnlyDictionary<string, Heater>? Sensors = null, // other sensors shown, by Klipper name ("temperature_fan chamber")
     IReadOnlyList<string>? Tiles = null); // the stats strip's tiles (see StatusText.StatsTiles)
 
-/// <summary>Target 0 means the heater is off. Heats is false for a plain sensor (or a fan's), which has no target to reach.</summary>
+/// <summary>Target 0 means the heater is off. Heats is false for a plain sensor, which has no target.</summary>
 public sealed record Heater(double Temperature, double Target, bool Heats = true);
 
 /// <summary>One line of the Klipper console (Moonraker's gcode store).</summary>

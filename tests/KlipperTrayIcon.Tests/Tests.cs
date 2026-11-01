@@ -579,11 +579,20 @@ public class IconTests
     }
 
     [Fact]
-    public void AtZeroPercentTheRingIsAFaintGreenTrack()
+    public void AtZeroPercentTheRingIsADarkGreenTrack()
     {
         var top = RingTop("printing", 0, false);
-        Assert.InRange(top.A, 40, 140); // there, but faint
-        Assert.True(top.G > top.R && top.G > top.B); // and green
+        Assert.Equal(255, top.A); // opaque, so the taskbar's colour doesn't show through
+        Assert.True(top.G > top.R && top.G > top.B && top.G < 150); // green, but dark
+    }
+
+    [Fact]
+    public void AFewPercentStillShowsAStub()
+    {
+        // 15° clockwise from the top, on the ring: past 1% (3.6°), within the minimum stub.
+        using var bitmap = TrayIconRenderer.Draw("printing", 0.01, 64);
+        var p = bitmap.GetPixel(38, 9);
+        Assert.True(p.G > 200, $"{p}");
     }
 
     [Fact]

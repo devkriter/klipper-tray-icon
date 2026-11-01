@@ -21,6 +21,8 @@ public interface IPrintQueue
     Task ReorderQueueAsync(IReadOnlyList<string> paths, CancellationToken ct);
     /// <summary>Starts the queue: if the printer is ready, the next job starts printing.</summary>
     Task StartQueueAsync(CancellationToken ct);
+    /// <summary>Prints this file now (the printer must be idle).</summary>
+    Task StartPrintAsync(string path, CancellationToken ct);
 }
 
 /// <summary>State is Moonraker's queue_state: ready, loading, starting or paused.</summary>

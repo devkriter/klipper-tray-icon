@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.10.0] - 2026-11-01
+### Added
+- Print queue: a small ▶ on each queued job and recent upload prints that file now. Like Start
+  next it asks first: the first click turns it into an amber *Confirm*. A queued job printed this
+  way leaves the queue (and doesn't set it to start the next one by itself). While the printer is
+  printing, paused, starting a job or offline, ▶ is there but greyed out.
+- Console: when Klipper shuts down (or can't start), the reason shows in red with *Click to restart*
+  under it, which does a firmware restart. The line goes once Klipper is running again; if it's
+  still down after 20 seconds, it says *Failed to restart* with *Click to try again*.
+- The title bar and tray tooltip say *Shut down* (or *Couldn't start*) while Klipper needs a
+  restart, with a red dot in the popup.
+
+### Changed
+- Print queue: the row buttons (▶, ✕ and now ＋) only show when the mouse is over the row.
+- Tray icon: a thicker ring with a solid track, so it stands out at 16px on any taskbar, including
+  one tinted by the wallpaper. A print that's only just under way shows a short stub of progress
+  rather than a sliver.
 ## [2.9.2] - 2026-11-01
 ### Fixed
 - Console: when the printer can't be reached, one line says so and counts down to the next try

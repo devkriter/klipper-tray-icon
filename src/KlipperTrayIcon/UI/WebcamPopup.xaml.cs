@@ -285,6 +285,12 @@ public partial class WebcamPopup : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => HidePopup();
 
+    private void OnConsoleLinkClick(object sender, MouseButtonEventArgs e)
+    {
+        if ((sender as FrameworkContentElement)?.DataContext is ConsoleLine { Click: { } click }) // the link's Run
+            click();
+    }
+
     /// <summary>Closes the window for good (settings changed, or the app is exiting).</summary>
     public void Shutdown()
     {
@@ -346,8 +352,11 @@ public partial class WebcamPopup : Window
         string file = status.State is "printing" or "paused" && status.Filename.Length > 0 ? DisplayName(status.Filename) : "";
         TitleFile.Text = file.Length > 0 ? " · " + file : "";
         Title = TitleText.Text + TitleFile.Text; // the taskbar button, when pinned
-        StateDot.Fill = status.Preparing ? PreparingDot : StateBrush(status.State);
+        StateDot.Fill = status.Halted != null ? ErrorDot : status.Preparing ? PreparingDot : StateBrush(status.State);
         QueueSawStatus(status);
+        // Offline (Klipper restarting, say) says nothing about it: the line stays until it's running.
+        if (status.State != "offline")
+            _console?.ShowHalted(status.Halted);
         if (!_showPanel)
             return;
         _statsTiles = status.Details?.Tiles ?? _statsTiles;
@@ -749,6 +758,13 @@ public sealed class ConsoleLine
     public FontFamily FontFamily { get; private init; } = Mono;
     public bool HasTime => Time.Length > 0;
     public bool IsTemperature { get; private init; }
+    // A line under the message: plain text, then a link ("Click to restart."), clickable when Click is set.
+    public string LinkPrefix { get; private init; } = "";
+    public string Link { get; private init; } = "";
+    public bool HasLink => LinkPrefix.Length + Link.Length > 0;
+    public Action? Click { get; private init; }
+    public bool IsClickable => Click != null;
+    public Brush LinkBrush => Command;
 
     private static Brush Frozen(string hex)
     {
@@ -797,6 +813,11 @@ public sealed class ConsoleLine
 
     public static ConsoleLine StatusMessage(string text) =>
         new() { Text = text, Brush = Status, FontStyle = FontStyles.Italic, FontFamily = Ui };
+
+    /// <summary>Klipper needs a restart: why, in red, and what to do about it underneath.</summary>
+    public static ConsoleLine Halted(string why, string prefix, string link, Action? click) =>
+        new() { Text = why, Brush = Error, FontWeight = FontWeights.SemiBold, FontFamily = Ui,
+                LinkPrefix = prefix, Link = link, Click = click };
 }
 
 /// <summary>
@@ -825,6 +846,10 @@ internal sealed class ConsoleFeed
     private volatile bool _wake = true;
     private bool _hasLines;
     private ConsoleLine? _errorLine; // "Console unavailable", at the end until it's back
+    private ConsoleLine? _haltLine; // Klipper has shut down, until it's running again
+    private string? _halted;
+    private bool _restarting;
+    private readonly CancellationToken _ct;
 
     public ConsoleFeed(IPrinterBackend backend, System.Windows.Controls.ItemsControl list,
                        System.Windows.Controls.ScrollViewer scroll, System.Windows.Threading.Dispatcher ui, CancellationToken ct)
@@ -832,6 +857,7 @@ internal sealed class ConsoleFeed
         _backend = backend;
         _scroll = scroll;
         _ui = ui;
+        _ct = ct;
         list.ItemsSource = _lines;
         _lines.Add(ConsoleLine.StatusMessage("Loading console…"));
         _ = Task.Run(() => LoopAsync(ct));
@@ -934,6 +960,61 @@ internal sealed class ConsoleFeed
             _lines.RemoveAt(0);
         if (follow)
             _scroll.Dispatcher.InvokeAsync(_scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// From the status updates: why Klipper needs a restart, or null once it's running. The line
+    /// says why, with "Click to restart." under it.
+    /// </summary>
+    public void ShowHalted(string? why)
+    {
+        if (why == _halted)
+            return;
+        (_halted, _restarting) = (why, false);
+        ShowHaltLine("", "Click to restart.", Restart);
+    }
+
+    private void ShowHaltLine(string prefix, string link, Action? click)
+    {
+        int at = _haltLine == null ? -1 : _lines.IndexOf(_haltLine);
+        if (_halted == null)
+        {
+            if (at >= 0)
+                _lines.RemoveAt(at);
+            _haltLine = null;
+            return;
+        }
+        _haltLine = ConsoleLine.Halted(_halted, prefix, link, click);
+        if (at >= 0)
+            _lines[at] = _haltLine;
+        else
+            Append(_haltLine);
+    }
+
+    private async void Restart()
+    {
+        if (_restarting)
+            return;
+        _restarting = true;
+        ShowHaltLine("Restarting…", "", null);
+        try
+        {
+            await Task.Run(() => _backend.RestartKlipperAsync(_ct));
+            // The line goes when the printer reports it running. If it's still down after a while
+            // (the problem is still there), offer it again.
+            await Task.Delay(TimeSpan.FromSeconds(20), _ct);
+            if (_restarting)
+            {
+                _restarting = false;
+                ShowHaltLine("Failed to restart. ", "Click to try again.", Restart);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e)
+        {
+            _restarting = false;
+            ShowHaltLine($"Couldn't restart: {_backend.DescribeError(e)}. ", "Click to try again.", Restart);
+        }
     }
 
     /// <summary>Shows or updates the one error line (null: removes it).</summary>

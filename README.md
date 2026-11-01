@@ -9,7 +9,7 @@ The icon updates dynamically to show a circular progress bar corresponding to th
 
 - **Dynamic Tray Icon**: visualizes print progress as a circular ring.
   - 🟡 **Gold Ring**: Preparing to print (start macro, heating, heat soak: before the first extrusion)
-  - 🟢 **Green Ring**: Printing (fills a faint green track, so it's visible at 0%)
+  - 🟢 **Green Ring**: Printing (fills a dark green track, so it's visible at 0% and on any taskbar)
   - 🟠 **Orange Ring**: Paused
   - 🔵 **Blue Ring**: Complete
   - 🔴 **Red Ring**: Printer error
@@ -25,12 +25,12 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   the printer's print queue (Moonraker's job queue, as in Mainsail): thumbnails (hover one for a
   larger preview), drag to reorder, ✕ to remove. Below it are the recent uploads not queued yet
   (*Load more* for older ones): ＋ adds one at the end, or drag it into the queue where you want it.
-  A small *Start next* button asks for a second click. Off by default; turn it on in Settings.
+  ▶ on any row prints that file now. It and *Start next* ask for a second click. Off by default; turn it on in Settings.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
-  including any of the printer's other temperature sensors. The console can be turned off in
-  Settings.
+  including any of the printer's other temperature sensors. If Klipper shuts down, the console says
+  why, with *Click to restart* under it. The console can be turned off in Settings.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Settings window**: switch printers, test the connection, change the refresh rate, and turn
   notifications and *Start with Windows* on or off. Changes apply immediately.

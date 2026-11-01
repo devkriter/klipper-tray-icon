@@ -7,7 +7,8 @@ namespace KlipperTrayIcon;
 /// <summary>
 /// Draws the tray icon: a ring that fills up with print progress, colored by state. While a print
 /// is preparing (start macro, heating) the ring is whole and gold; once it prints, the green fills
-/// a faint green track, so it doesn't vanish at 0%.
+/// a dark green track, so it doesn't vanish at 0%. The ring is thick and the track opaque so it
+/// reads at 16px on any taskbar, including one tinted by the wallpaper.
 /// </summary>
 public static class TrayIconRenderer
 {
@@ -22,6 +23,8 @@ public static class TrayIconRenderer
     };
 
     private static readonly Color Preparing = Color.FromArgb(255, 200, 40); // gold
+    internal static readonly Color Track = Color.FromArgb(14, 98, 55); // the printing green, a third as bright
+    internal const float MinSweep = 18; // degrees
 
     /// <summary>Geometry is laid out on a 64px grid and scaled to size.</summary>
     public static Bitmap Draw(string state, double progress, int size = 64, bool preparing = false)
@@ -32,24 +35,25 @@ public static class TrayIconRenderer
         g.Clear(Color.Transparent);
 
         float k = size / 64f;
-        float ring = Math.Max(1f, 6 * k);
+        float ring = Math.Max(2f, 11 * k);
         // The pen is centred on the path, so inset by half its width to keep
-        // the ring's outer edge 4px from the border.
-        float inset = 4 * k + ring / 2;
+        // the ring's outer edge 3px from the border.
+        float inset = 3 * k + ring / 2;
         var rect = new RectangleF(inset, inset, size - 2 * inset, size - 2 * inset);
 
         bool filling = state == "printing" && !preparing;
         Color color = state == "printing" && preparing ? Preparing : StateColor(state);
-        // The track the progress fills: faint green while printing, faint grey otherwise.
-        using (var background = new Pen(filling ? Color.FromArgb(80, color) : Color.FromArgb(50, 200, 200, 200), ring))
-            g.DrawEllipse(background, rect);
-
         using var pen = new Pen(color, ring);
         progress = Math.Clamp(progress, 0, 1);
         if (filling)
         {
+            // The track the progress fills: the green, darkened but opaque. A see-through one takes
+            // on the taskbar's colour and all but disappears on some.
+            using (var track = new Pen(Track, ring))
+                g.DrawEllipse(track, rect);
+            // At least a short stub once it's under way: a sliver this small is lost at tray size.
             if (progress > 0)
-                g.DrawArc(pen, rect, -90, (float)(360 * progress));
+                g.DrawArc(pen, rect, -90, Math.Max((float)(360 * progress), MinSweep));
         }
         else
         {
@@ -59,7 +63,7 @@ public static class TrayIconRenderer
         if (state == "offline")
         {
             using var dot = new SolidBrush(Color.FromArgb(220, 20, 60));
-            g.FillEllipse(dot, 38 * k, 38 * k, 24 * k, 24 * k);
+            g.FillEllipse(dot, 36 * k, 36 * k, 26 * k, 26 * k);
         }
         return bitmap;
     }

@@ -44,6 +44,8 @@ public interface IPrinterBackend : IDisposable
     Task<IReadOnlyList<ConsoleEntry>> GetConsoleMessagesAsync(int count, CancellationToken ct);
     /// <summary>Which console lines to hide (Mainsail's settings). Throws if the printer can't be reached.</summary>
     Task<ConsoleFilter> GetConsoleFilterAsync(CancellationToken ct) => Task.FromResult(ConsoleFilter.None);
+    /// <summary>Restarts Klipper after it shut down (FIRMWARE_RESTART). Throws if it can't.</summary>
+    Task RestartKlipperAsync(CancellationToken ct) => throw new NotSupportedException();
     /// <summary>Human-readable reason for an exception thrown by this backend.</summary>
     string DescribeError(Exception e);
 }

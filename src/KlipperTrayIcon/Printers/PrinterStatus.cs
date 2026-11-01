@@ -6,7 +6,8 @@ namespace KlipperTrayIcon.Printers;
 /// State is one of: printing, paused, complete, cancelled, error (the printer
 /// reports a fault), standby, or offline (we can't talk to the printer -
 /// Message says why). Preparing: printing, but still in the start routine
-/// (start macro, heating, heat soak), before the first extrusion.
+/// (start macro, heating, heat soak), before the first extrusion. Halted: Klipper has shut down or
+/// couldn't start, and why; it needs a restart.
 /// </summary>
 public sealed record PrinterStatus(
     string State,
@@ -16,7 +17,8 @@ public sealed record PrinterStatus(
     string EtaSource = "Calc",
     string Message = "",
     PrintDetails? Details = null,
-    bool Preparing = false)
+    bool Preparing = false,
+    string? Halted = null)
 {
     public static PrinterStatus Connecting { get; } = new("standby", 0, Message: "Connecting...");
 

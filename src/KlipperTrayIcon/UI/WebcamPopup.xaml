@@ -183,7 +183,53 @@
                 </StackPanel>
             </Grid>
         </DataTemplate>
-        <!-- A queued job: drag it to reorder (an open hand over it says so), ✕ (on hover) to remove. -->
+        <!-- ▶ on a row (on hover): prints that file now. The first click turns it into an amber "Confirm",
+             like Start next. While the printer is busy (or offline) it's there but greyed out. -->
+        <Style x:Key="PlayButton" TargetType="Button" BasedOn="{StaticResource StartButton}">
+            <!-- Compact, to sit with ✕ and ＋: Start next's look at about their size. -->
+            <Setter Property="Height" Value="20" />
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,2,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Opacity" Value="0.85" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Visibility" Value="Hidden" />
+            <Setter Property="IsEnabled" Value="{DynamicResource PlayEnabled}" />
+            <Setter Property="ToolTip" Value="Print now" />
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55" />
+                    <Setter Property="Cursor" Value="Arrow" />
+                    <Setter Property="ToolTip" Value="Can be started when the printer is idle" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PlayGlyph" TargetType="TextBlock">
+            <Setter Property="Text" Value="&#x25B6;" />
+            <Setter Property="FontSize" Value="9" />
+            <Setter Property="Foreground" Value="#5FC27A" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType=Button}}" Value="False">
+                    <Setter Property="Foreground" Value="#8C8C8C" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- A queued job: drag it to reorder (an open hand over it says so), ▶ to print it now, ✕ to remove
+             (both on hover). -->
         <DataTemplate x:Key="QueueRow">
             <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="6,4,4,4" Cursor="{DynamicResource GrabCursor}"
                     MouseLeftButtonDown="OnRowMouseDown" MouseMove="OnRowMouseMove"
@@ -192,20 +238,28 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
-                    <Button x:Name="Remove" Grid.Column="1" Content="&#x2715;" FontSize="11" Style="{StaticResource RowButton}"
+                    <Border Grid.Column="1" Visibility="{DynamicResource PlayVisibility}">
+                        <Button x:Name="Play" Style="{StaticResource PlayButton}" Click="OnPlayClick">
+                            <TextBlock Style="{StaticResource PlayGlyph}" />
+                        </Button>
+                    </Border>
+                    <Button x:Name="Remove" Grid.Column="2" Content="&#x2715;" FontSize="11" Style="{StaticResource RowButton}"
                             Visibility="Hidden" ToolTip="Remove from the queue" Click="OnQueueRemoveClick" />
                 </Grid>
             </Border>
             <DataTemplate.Triggers>
                 <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
                     <Setter TargetName="Row" Property="Background" Value="#1E1E1E" />
+                    <Setter TargetName="Play" Property="Visibility" Value="Visible" />
                     <Setter TargetName="Remove" Property="Visibility" Value="Visible" />
                 </Trigger>
             </DataTemplate.Triggers>
         </DataTemplate>
-        <!-- A recently uploaded file: ＋ adds it to the end of the queue; drag it into the queue to put it anywhere. -->
+        <!-- A recently uploaded file: ▶ prints it now, ＋ adds it to the end of the queue (both on hover); drag it
+             into the queue to put it anywhere. -->
         <DataTemplate x:Key="RecentRow">
             <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="6,4,4,4" Cursor="{DynamicResource GrabCursor}"
                     MouseLeftButtonDown="OnRowMouseDown" MouseMove="OnRowMouseMove"
@@ -214,15 +268,24 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
-                    <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                            Style="{StaticResource RowButton}" ToolTip="Add to the end of the queue" Click="OnQueueAddClick" />
+                    <Border Grid.Column="1" Visibility="{DynamicResource PlayVisibility}">
+                        <Button x:Name="Play" Style="{StaticResource PlayButton}" Click="OnPlayClick">
+                            <TextBlock Style="{StaticResource PlayGlyph}" />
+                        </Button>
+                    </Border>
+                    <Button x:Name="Add" Grid.Column="2" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Style="{StaticResource RowButton}" Visibility="Hidden" ToolTip="Add to the end of the queue"
+                            Click="OnQueueAddClick" />
                 </Grid>
             </Border>
             <DataTemplate.Triggers>
                 <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
                     <Setter TargetName="Row" Property="Background" Value="#1E1E1E" />
+                    <Setter TargetName="Play" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Add" Property="Visibility" Value="Visible" />
                 </Trigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -354,10 +417,38 @@
                                                    Visibility="{Binding HasTime, Converter={StaticResource BoolToVisibility}}" />
                                         <!-- Second column: wrapped and multi-line messages stay under the
                                              message, never under the time. -->
-                                        <TextBlock Grid.Column="1" Text="{Binding Text}" Foreground="{Binding Brush}"
-                                                   FontStyle="{Binding FontStyle}" FontWeight="{Binding FontWeight}"
-                                                   FontSize="13" LineHeight="18"
-                                                   FontFamily="{Binding FontFamily}" TextWrapping="Wrap" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
+                                                       FontStyle="{Binding FontStyle}" FontWeight="{Binding FontWeight}"
+                                                       FontSize="13" LineHeight="18"
+                                                       FontFamily="{Binding FontFamily}" TextWrapping="Wrap" />
+                                            <!-- Under a Klipper shutdown: "Click to restart.", or "Failed to restart.
+                                                 Click to try again." with only the second part a link. -->
+                                            <TextBlock FontSize="13" FontFamily="Segoe UI" Margin="0,2,0,0" TextWrapping="Wrap"
+                                                       Foreground="#A0A0A0"
+                                                       Visibility="{Binding HasLink, Converter={StaticResource BoolToVisibility}}">
+                                                <Run Text="{Binding LinkPrefix, Mode=OneWay}" /><Run
+                                                     Text="{Binding Link, Mode=OneWay}" Foreground="{Binding LinkBrush, Mode=OneWay}"
+                                                     MouseLeftButtonUp="OnConsoleLinkClick">
+                                                    <Run.Style>
+                                                        <Style TargetType="Run">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsClickable}" Value="True">
+                                                                    <Setter Property="Cursor" Value="Hand" />
+                                                                </DataTrigger>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsClickable}" Value="True" />
+                                                                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="TextDecorations" Value="Underline" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Run.Style>
+                                                </Run>
+                                            </TextBlock>
+                                        </StackPanel>
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

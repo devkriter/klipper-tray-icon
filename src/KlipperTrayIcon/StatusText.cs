@@ -25,10 +25,20 @@ public static partial class StatusText
         : state.Length == 0 ? "Unknown" : char.ToUpperInvariant(state[0]) + state[1..];
 
     /// <summary>Headline plus detail lines, e.g. "Printing · 45%", "1h 5m left · done 14:32 (slicer)", "Benchy.gcode".</summary>
+    // How PrinterStatus.Halted starts.
+    public const string ShutDown = "Klipper has shut down", CouldntStart = "Klipper couldn't start";
+
     public static List<string> Lines(PrinterStatus s, DateTime? now = null)
     {
         string label = Label(s.State);
         var lines = new List<string>();
+        if (s.Halted != null)
+        {
+            // Klipper needs a restart: that's the news, whatever it was doing.
+            lines.Add(s.Halted.StartsWith(CouldntStart) ? "Couldn't start" : "Shut down");
+            lines.Add(s.Halted);
+            return lines;
+        }
         if (s.State is "printing" or "paused")
         {
             lines.Add(s.Preparing ? "Preparing to print" : $"{label} · {(int)(s.Progress * 100)}%");

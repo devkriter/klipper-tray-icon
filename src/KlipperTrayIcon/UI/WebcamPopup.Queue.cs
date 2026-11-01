@@ -61,7 +61,7 @@ public partial class WebcamPopup
         _queue = queue;
         QueueList.ItemsSource = _queueRows;
         RecentList.ItemsSource = _recentRows;
-        _disarm.Tick += (_, _) => { _startArmed = false; _disarm.Stop(); UpdateStartButton(); };
+        _disarm.Tick += (_, _) => { _startArmed = false; _disarm.Stop(); ArmPlay(null); UpdateStartButton(); };
         // Without the console, the panel is just the queue.
         QueueButton.Visibility = consoleToo ? Visibility.Visible : Visibility.Collapsed;
         ShowQueuePanel(!consoleToo);
@@ -263,6 +263,14 @@ public partial class WebcamPopup
             return;
         var jobs = _queueStatus?.Jobs ?? [];
         bool busy = _printerState is "printing" or "paused";
+        // The rows' ▶: enabled whenever a print could start (not just with something queued), greyed out
+        // while printing, paused, starting or offline.
+        bool canPlay = _queueStatus != null && !busy && _printerState != "offline"
+                       && _queueStatus.State is not ("loading" or "starting") && DateTime.UtcNow >= _playHeldUntil;
+        Resources["PlayVisibility"] = _queueStatus != null ? Visibility.Visible : Visibility.Collapsed;
+        Resources["PlayEnabled"] = canPlay;
+        if (!canPlay)
+            ArmPlay(null);
         string? note = _queueStatus == null ? "Loading…"
             : jobs.Count == 0 ? ""
             : _printerState == "offline" ? "Printer offline"
@@ -311,6 +319,7 @@ public partial class WebcamPopup
         {
             // First click: ask for the second, which actually starts the printer.
             _startArmed = true;
+            ArmPlay(null);
             _disarm.Stop();
             _disarm.Start();
             UpdateStartButton();
@@ -322,6 +331,62 @@ public partial class WebcamPopup
         QueueStateText.Text = "Starting…";
         QueueStateText.Visibility = Visibility.Visible;
         await QueueActionAsync(q => q.StartQueueAsync(_lifetime.Token), "Couldn't start");
+    }
+
+    // ---- print now (a row's ▶) --------------------------------------------------------
+
+    private Button? _armedPlay;
+    // After a start, ▶ stays away until the printer says it's printing (or a while, if it didn't start).
+    private DateTime _playHeldUntil;
+
+    private async void OnPlayClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.DataContext is not QueueRow row)
+            return;
+        _disarm.Stop();
+        if (_armedPlay != button)
+        {
+            // First click: ask for the second, as Start next does.
+            _startArmed = false;
+            ArmPlay(button);
+            UpdateStartButton();
+            _disarm.Start();
+            return;
+        }
+        ArmPlay(null);
+        _playHeldUntil = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        // A queued job leaves the queue when it's printed from here.
+        bool queued = _queueRows.Remove(row);
+        if (queued)
+        {
+            ShowRecent();
+            ShowQueueCount();
+        }
+        UpdateStartButton();
+        await QueueActionAsync(async q =>
+        {
+            await q.StartPrintAsync(row.Path, _lifetime.Token);
+            if (queued && row.JobId != "")
+                await q.RemoveFromQueueAsync(row.JobId, _lifetime.Token);
+        }, "Couldn't start it");
+    }
+
+    /// <summary>Turns a row's ▶ into an amber Confirm (null: puts the armed one back).</summary>
+    private void ArmPlay(Button? button)
+    {
+        if (_armedPlay is { } old)
+            foreach (var property in new[] { ContentControl.ContentProperty, BackgroundProperty, ForegroundProperty,
+                                             BorderBrushProperty, VisibilityProperty, ToolTipProperty, PaddingProperty })
+                old.ClearValue(property);
+        _armedPlay = button;
+        if (button?.DataContext is not QueueRow row)
+            return;
+        button.Content = "Confirm";
+        button.Padding = new Thickness(7, 0, 7, 0);
+        button.Background = button.BorderBrush = ConsoleLine.TemperatureBrush;
+        button.Foreground = Brushes.Black;
+        button.Visibility = Visibility.Visible; // stays while the mouse moves away to think about it
+        button.ToolTip = $"Starts printing {row.Name}";
     }
 
     // ---- add, remove, reorder ---------------------------------------------------------

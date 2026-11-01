@@ -130,7 +130,7 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
             using var doc = await GetJsonAsync(
                 "/printer/objects/query?print_stats&display_status&virtual_sdcard" +
                 $"&{_activeExtruder}=temperature,target&toolhead=extruder" +
-                "&heater_bed=temperature,target&gcode_move=gcode_position" +
+                "&heater_bed=temperature,target&gcode_move=gcode_position&webhooks=state,state_message" +
                 (_statsTiles == null && _chamber == null ? "&heaters=available_sensors" : "") +
                 string.Concat(Tiles.Where(StatusText.IsSensorTile).Select(t => $"&{Uri.EscapeDataString(t)}=temperature,target")),
                 TimeSpan.FromSeconds(2), ct);
@@ -201,13 +201,31 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
             // printer is still running the start routine (start macro, heating, heat soak).
             bool preparing = state == "printing" && printDuration <= 0;
             return new PrinterStatus(state, progress, filename, timeLeft, etaSource,
-                                     Details: ReadDetails(status, state, _fileInfo), Preparing: preparing);
+                                     Details: ReadDetails(status, state, _fileInfo), Preparing: preparing,
+                                     Halted: Halted(status.Prop("webhooks")));
         }
         catch (Exception e) when (!ct.IsCancellationRequested)
         {
             return PrinterStatus.Offline(DescribeError(e));
         }
     }
+
+    /// <summary>
+    /// Why Klipper needs a restart (shut down, or couldn't start), from the first line of its
+    /// state message; null while it's running.
+    /// </summary>
+    internal static string? Halted(JsonElement webhooks)
+    {
+        string state = webhooks.Str("state");
+        if (state is not ("shutdown" or "error"))
+            return null;
+        string reason = webhooks.Str("state_message").Trim().Split('\n')[0].Trim().TrimEnd('.');
+        string what = state == "shutdown" ? StatusText.ShutDown : StatusText.CouldntStart;
+        return reason.Length > 0 ? $"{what}: {reason}" : what;
+    }
+
+    public Task RestartKlipperAsync(CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/printer/firmware_restart", null, ct);
 
     private PrintDetails ReadDetails(JsonElement status, string state, GcodeFileInfo file)
     {
@@ -429,6 +447,9 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
 
     public Task StartQueueAsync(CancellationToken ct) =>
         SendAsync(HttpMethod.Post, "/server/job_queue/start", null, ct);
+
+    public Task StartPrintAsync(string path, CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/printer/print/start?filename=" + Uri.EscapeDataString(path), null, ct);
 
     /// <summary>A request that changes something on the printer. Throws unless it succeeds.</summary>
     private async Task SendAsync(HttpMethod method, string pathAndQuery, object? json, CancellationToken ct)

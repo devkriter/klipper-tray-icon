@@ -98,12 +98,49 @@ public class PrintQueueTests
         await backend.RemoveFromQueueAsync("0001", default);
         await backend.ReorderQueueAsync(["parts/Clip.gcode", "Benchy.gcode"], default);
         await backend.StartQueueAsync(default);
+        await backend.StartPrintAsync("parts/Big part.gcode", default);
         Assert.Equal([
             """POST /server/job_queue/job {"filenames":["parts/Clip.gcode"]}""",
             "DELETE /server/job_queue/job?job_ids=0001",
             """POST /server/job_queue/job {"filenames":["parts/Clip.gcode","Benchy.gcode"],"reset":true}""",
             "POST /server/job_queue/start",
+            "POST /printer/print/start?filename=parts/Big part.gcode", // the fake records it unescaped
         ], printer.Requests);
+    }
+
+    [Theory]
+    [InlineData("""{"state":"ready","state_message":"Printer is ready"}""", null)]
+    [InlineData("""{"state":"startup","state_message":"Printer is not ready"}""", null)]
+    [InlineData("""{"state":"shutdown","state_message":"Lost communication with MCU 'mcu'\nOnce the underlying issue is corrected, use the \"FIRMWARE_RESTART\" command.\nPrinter is shutdown"}""",
+                "Klipper has shut down: Lost communication with MCU 'mcu'")]
+    [InlineData("""{"state":"shutdown","state_message":"Shutdown due to webhooks request."}""",
+                "Klipper has shut down: Shutdown due to webhooks request")]
+    [InlineData("""{"state":"error","state_message":"Option 'foo' is not valid in section 'printer'\n"}""",
+                "Klipper couldn't start: Option 'foo' is not valid in section 'printer'")]
+    [InlineData("""{"state":"shutdown"}""", "Klipper has shut down")]
+    [InlineData("{}", null)]
+    public void KlipperNeedingARestartSaysWhy(string webhooks, string? expected)
+    {
+        using var doc = JsonDocument.Parse(webhooks);
+        Assert.Equal(expected, MoonrakerBackend.Halted(doc.RootElement));
+    }
+
+    [Theory]
+    [InlineData("Klipper has shut down: Lost communication with MCU 'mcu'", "Shut down")]
+    [InlineData("Klipper couldn't start: Option 'foo' is not valid", "Couldn't start")]
+    public void KlipperNeedingARestartIsTheHeadline(string halted, string headline)
+    {
+        // Even mid-print: the print has stopped with it.
+        var lines = StatusText.Lines(new PrinterStatus("printing", 0.4, "Benchy.gcode", Halted: halted));
+        Assert.Equal([headline, halted], lines);
+    }
+
+    [Fact]
+    public async Task RestartIsAFirmwareRestart()
+    {
+        var (backend, printer) = Make();
+        await backend.RestartKlipperAsync(default);
+        Assert.Equal(["POST /printer/firmware_restart"], printer.Requests);
     }
 
     [Fact]

@@ -79,9 +79,11 @@ public static class PrinterBackends
         config.IsBambu
             ? new BambuBackend(config.BambuIp, config.BambuSerial, config.BambuAccessCode)
             : config.IsU1
-                // Klipper, plus the touchscreen as the second view (instead of a second camera).
+                // Klipper, with the touchscreen as the second view (or a second camera).
                 ? new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
                                        webcamName: config.WebcamName, webcamStream: config.WebcamStream,
+                                       secondViewName: config.U1Touchscreen ? "" : config.SecondViewName,
+                                       secondViewStream: config.U1Touchscreen ? "" : config.SecondViewStream,
                                        remoteScreen: config.U1Touchscreen, statsTiles: config.StatsTiles)
                 : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
                                        webcamName: config.WebcamName, secondViewName: config.SecondViewName,
@@ -95,6 +97,13 @@ public static class PrinterBackends
             return false;
         using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
         return await backend.HasJobQueueAsync(ct);
+    }
+
+    /// <summary>Whether a U1 Extended serves its touchscreen (Remote Screen turned on), for the settings window.</summary>
+    public static async Task<bool> HasTouchscreenAsync(AppConfig config, CancellationToken ct = default)
+    {
+        using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
+        return await backend.HasRemoteScreenAsync(ct);
     }
 
     /// <summary>The printer's temperature sensors besides nozzles and bed, for the settings window. Throws if it can't be reached.</summary>

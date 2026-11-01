@@ -1,7 +1,7 @@
 @echo off
 setlocal
 rem Builds the release zip: publish\KlipperTrayIcon_v<VERSION>.zip
-set VERSION=2.8.0
+set VERSION=2.9.0
 set OUT=publish\KlipperTrayIcon
 cd /d "%~dp0"
 
@@ -28,6 +28,9 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+rem GPL-3.0: the license goes with the app.
+copy /y LICENSE "%OUT%\LICENSE.txt" >nul
 
 echo Zipping release...
 powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Compress-Archive -Path '%OUT%' -DestinationPath 'publish\KlipperTrayIcon_v%VERSION%.zip' -Force"

@@ -30,6 +30,9 @@
                 <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
                     <Setter TargetName="Description" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding Description}" Value="">
+                    <Setter TargetName="Description" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding Available}" Value="False">
                     <Setter TargetName="Label" Property="Opacity" Value="0.5" />
                 </DataTrigger>
@@ -56,6 +59,38 @@
         <Style x:Key="FieldLabel" TargetType="TextBlock">
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,0,16,0" />
+        </Style>
+        <!-- A slot of the stats strip picker: drawn like the strip's tile, with the label it'll show. -->
+        <Style x:Key="StatsSlot" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Height" Value="42" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="8,0,6,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="&#xE70D;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           FontSize="9" Opacity="0.6" VerticalAlignment="Center" Margin="4,0,0,0" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
@@ -84,13 +119,6 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -137,38 +165,6 @@
                        Text="Optional — leave blank unless Moonraker asks for one." />
 
             <!-- Filled from the printer's webcam list once it's been reached. -->
-            <TextBlock Grid.Row="4" Text="Camera" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="CameraCombo" Grid.Row="4" Grid.Column="1" Margin="0,0,0,8"
-                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
-            <!-- How each camera is fetched: every kind the app supports, greyed out where the camera doesn't offer it. -->
-            <ComboBox x:Name="CameraStreamCombo" Grid.Row="4" Grid.Column="2" Width="170" Margin="8,0,0,8"
-                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
-                      ToolTip="{StaticResource StreamTip}" />
-            <TextBlock x:Name="SecondViewLabel" Grid.Row="5" Text="Second view" Style="{StaticResource FieldLabel}" />
-            <ComboBox x:Name="SecondViewCombo" Grid.Row="5" Grid.Column="1"
-                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
-            <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="5" Grid.Column="2" Width="170" Margin="8,0,0,0"
-                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
-                      ToolTip="{StaticResource StreamTip}" />
-            <!-- Snapmaker U1, in place of the second view: its touchscreen. -->
-            <CheckBox x:Name="TouchscreenCheck" Grid.Row="5" Grid.ColumnSpan="3" Visibility="Collapsed"
-                      Content="Show the printer's touchscreen in the webcam popup, and let me use it" />
-            <TextBlock x:Name="SourcesHint" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
-                       Text="Test connection lists the printer's cameras and the streams each one offers." />
-
-            <CheckBox x:Name="ConsoleCheck" Grid.Row="7" Grid.ColumnSpan="3" Margin="0,0,0,8"
-                      Content="Show the Klipper console next to the webcam"
-                      ToolTip="It hides the same messages as Mainsail's console, using Mainsail's console filters." />
-            <!-- Off by default: it can start prints. Greyed out if the printer has no queue. -->
-            <CheckBox x:Name="QueueCheck" Grid.Row="8" Grid.ColumnSpan="3" Margin="0,0,0,8"
-                      Content="Show the print queue in the webcam popup"
-                      ToolTip="Queued jobs with drag-to-reorder, recent uploads to add, and a button that starts the next print." />
-
-            <!-- The stats strip at the top of the popup's side panel: up to 6 tiles, in this order. -->
-            <TextBlock Grid.Row="9" Text="Stats strip" Style="{StaticResource FieldLabel}" VerticalAlignment="Top"
-                       Margin="0,4,16,0" />
-            <WrapPanel x:Name="StatsPicker" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4,0,0" />
-            <TextBlock x:Name="StatsHint" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}" />
         </Grid>
 
         <!-- Bambu -->
@@ -206,7 +202,58 @@
             <TextBlock x:Name="TestResult" VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap" MaxWidth="380" />
         </StackPanel>
 
-        <Separator Margin="0,20,0,18" />
+        <!-- Klipper: what the popup shows, below the connection test. -->
+        <Grid x:Name="KlipperOptions" Margin="0,18,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120" />
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="Camera" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="CameraCombo" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label" SelectionChanged="OnCameraChanged" />
+            <!-- How each camera is fetched: every kind the app supports, greyed out where the camera doesn't offer it. -->
+            <ComboBox x:Name="CameraStreamCombo" Grid.Row="0" Grid.Column="2" Width="170" Margin="8,0,0,8"
+                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
+                      ToolTip="{StaticResource StreamTip}" />
+            <TextBlock x:Name="SecondViewLabel" Grid.Row="1" Text="Second view" Style="{StaticResource FieldLabel}" />
+            <!-- On a U1 Extended, the printer's touchscreen is one of the choices. -->
+            <ComboBox x:Name="SecondViewCombo" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch"
+                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
+                      SelectionChanged="OnCameraChanged" />
+            <ComboBox x:Name="SecondViewStreamCombo" Grid.Row="1" Grid.Column="2" Width="170" Margin="8,0,0,0"
+                      ItemTemplate="{StaticResource StreamItem}" ItemContainerStyle="{StaticResource StreamItemContainer}"
+                      ToolTip="{StaticResource StreamTip}" />
+            <TextBlock x:Name="SourcesHint" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       Text="Test connection lists the printer's cameras and the streams each one offers." />
+
+            <CheckBox x:Name="ConsoleCheck" Grid.Row="3" Grid.ColumnSpan="3" Margin="0,0,0,8"
+                      Content="Show the Klipper console next to the webcam"
+                      ToolTip="It hides the same messages as Mainsail's console, using Mainsail's console filters." />
+            <!-- Off by default: it can start prints. Greyed out if the printer has no queue. -->
+            <CheckBox x:Name="QueueCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,8"
+                      Content="Show the print queue in the webcam popup"
+                      ToolTip="Queued jobs with drag-to-reorder, recent uploads to add, and a button that starts the next print." />
+
+            <!-- The stats strip at the top of the popup's side panel: up to 6 tiles, in this order. -->
+            <!-- The strip, the whole width, as wide as there's room for: it's six tiles. -->
+            <TextBlock Grid.Row="5" Text="Stats strip" Style="{StaticResource FieldLabel}" Margin="0,6,16,6" />
+            <TextBlock x:Name="StatsHint" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                       VerticalAlignment="Center" Margin="0" />
+            <UniformGrid x:Name="StatsSlots" Grid.Row="6" Grid.ColumnSpan="3" Rows="1" Margin="0,2,-6,4" />
+        </Grid>
+
+        <Separator Margin="0,8,0,16" />
 
         <TextBlock Text="General" Style="{StaticResource SectionHeader}" />
         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">

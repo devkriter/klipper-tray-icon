@@ -183,29 +183,18 @@
                 </StackPanel>
             </Grid>
         </DataTemplate>
-        <!-- A queued job: drag the handle to reorder, ✕ (on hover) to remove. -->
+        <!-- A queued job: drag it to reorder (an open hand over it says so), ✕ (on hover) to remove. -->
         <DataTemplate x:Key="QueueRow">
-            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="2,4,4,4">
+            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="6,4,4,4" Cursor="{DynamicResource GrabCursor}"
+                    MouseLeftButtonDown="OnRowMouseDown" MouseMove="OnRowMouseMove"
+                    MouseLeftButtonUp="OnRowMouseUp" LostMouseCapture="OnRowLostCapture">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Thumb x:Name="Handle" Width="22" Cursor="SizeNS" ToolTip="Drag to change the order" Tag="#4A4A4A"
-                           DragStarted="OnQueueDragStarted" DragDelta="OnQueueDragDelta" DragCompleted="OnQueueDragCompleted">
-                        <Thumb.Template>
-                            <ControlTemplate>
-                                <Border Background="Transparent">
-                                    <TextBlock Text="&#xE784;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13"
-                                               Foreground="{Binding Tag, RelativeSource={RelativeSource AncestorType=Thumb}}"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
-                            </ControlTemplate>
-                        </Thumb.Template>
-                    </Thumb>
-                    <ContentPresenter Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
-                    <Button x:Name="Remove" Grid.Column="2" Content="&#x2715;" FontSize="11" Style="{StaticResource RowButton}"
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
+                    <Button x:Name="Remove" Grid.Column="1" Content="&#x2715;" FontSize="11" Style="{StaticResource RowButton}"
                             Visibility="Hidden" ToolTip="Remove from the queue" Click="OnQueueRemoveClick" />
                 </Grid>
             </Border>
@@ -213,22 +202,22 @@
                 <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
                     <Setter TargetName="Row" Property="Background" Value="#1E1E1E" />
                     <Setter TargetName="Remove" Property="Visibility" Value="Visible" />
-                    <Setter TargetName="Handle" Property="Tag" Value="#9A9A9A" />
                 </Trigger>
             </DataTemplate.Triggers>
         </DataTemplate>
-        <!-- A recently uploaded file: ＋ adds it to the queue. -->
+        <!-- A recently uploaded file: ＋ adds it to the end of the queue; drag it into the queue to put it anywhere. -->
         <DataTemplate x:Key="RecentRow">
-            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="2,4,4,4">
+            <Border x:Name="Row" Background="#141414" CornerRadius="4" Padding="6,4,4,4" Cursor="{DynamicResource GrabCursor}"
+                    MouseLeftButtonDown="OnRowMouseDown" MouseMove="OnRowMouseMove"
+                    MouseLeftButtonUp="OnRowMouseUp" LostMouseCapture="OnRowLostCapture">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="22" /> <!-- where queued rows have their handle -->
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ContentPresenter Grid.Column="1" Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
-                    <Button Grid.Column="2" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                            Style="{StaticResource RowButton}" ToolTip="Add to the queue" Click="OnQueueAddClick" />
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FileInfo}" />
+                    <Button Grid.Column="1" Content="&#xE710;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Style="{StaticResource RowButton}" ToolTip="Add to the end of the queue" Click="OnQueueAddClick" />
                 </Grid>
             </Border>
             <DataTemplate.Triggers>
@@ -387,22 +376,28 @@
                             <Button x:Name="StartNextButton" Style="{StaticResource StartButton}" Click="OnStartNextClick"
                                     HorizontalAlignment="Right" Visibility="Collapsed" />
                         </Grid>
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                        <ScrollViewer x:Name="QueueScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                                       PanningMode="VerticalOnly">
                             <ScrollViewer.Resources>
                                 <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
                             </ScrollViewer.Resources>
-                            <StackPanel Margin="6,0,8,8">
+                            <StackPanel x:Name="QueueContent" Margin="6,0,8,8">
                                 <ItemsControl x:Name="QueueList" ItemTemplate="{StaticResource QueueRow}" />
-                                <TextBlock x:Name="QueueEmpty" Text="Nothing queued. Add a file from the recent uploads below."
-                                           Foreground="#8C8C8C" FontSize="12" FontStyle="Italic" TextWrapping="Wrap"
-                                           Margin="6,2,6,4" Visibility="Collapsed" />
-                                <TextBlock Text="RECENT UPLOADS" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
-                                           Margin="6,14,6,6" />
-                                <ItemsControl x:Name="RecentList" ItemTemplate="{StaticResource RecentRow}" />
-                                <Button x:Name="LoadMoreButton" Content="Load more" Style="{StaticResource RowButton}"
-                                        Width="Auto" Height="26" FontSize="12" Foreground="#8C8C8C" Margin="0,2,0,0"
-                                        Visibility="Collapsed" Click="OnLoadMoreClick" />
+                                <!-- Everything under the queue, moved down together while a recent upload is dragged into it. -->
+                                <StackPanel x:Name="BelowQueue">
+                                    <StackPanel.RenderTransform>
+                                        <TranslateTransform />
+                                    </StackPanel.RenderTransform>
+                                    <TextBlock x:Name="QueueEmpty" Text="Nothing queued. Add a file from the recent uploads below."
+                                               Foreground="#8C8C8C" FontSize="12" FontStyle="Italic" TextWrapping="Wrap"
+                                               Margin="6,2,6,4" Visibility="Collapsed" />
+                                    <TextBlock x:Name="RecentHeading" Text="RECENT UPLOADS" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
+                                               Margin="6,14,6,6" />
+                                    <ItemsControl x:Name="RecentList" ItemTemplate="{StaticResource RecentRow}" />
+                                    <Button x:Name="LoadMoreButton" Content="Load more" Style="{StaticResource RowButton}"
+                                            Width="Auto" Height="26" FontSize="12" Foreground="#8C8C8C" Margin="0,2,0,0"
+                                            Visibility="Collapsed" Click="OnLoadMoreClick" />
+                                </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </DockPanel>

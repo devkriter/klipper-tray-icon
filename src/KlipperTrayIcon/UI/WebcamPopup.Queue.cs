@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -41,13 +41,18 @@ public partial class WebcamPopup
     private bool _startArmed;
     private readonly DispatcherTimer _disarm = new() { Interval = StartConfirmTime };
     private readonly Dictionary<string, (byte[] Bytes, BitmapSource Image)> _thumbnails = new();
-    // Dragging a queued job by its handle.
+    // Dragging a row: pressed (not yet moved far enough to be a drag), then dragged.
+    private QueueRow? _pressRow;
+    private FrameworkElement? _pressElement;
+    private Point _pressPoint;
     private QueueRow? _dragRow;
     private FrameworkElement? _dragContainer;
-    private int _dragFrom;
+    private bool _dragFromQueue;
+    private int _dropIndex = -1; // where it lands in the queue; -1 when it's not over the queue
 
     private void SetUpQueue(IPrintQueue queue, bool consoleToo)
     {
+        Resources["GrabCursor"] = HandCursors.Open;
         _queue = queue;
         QueueList.ItemsSource = _queueRows;
         RecentList.ItemsSource = _recentRows;
@@ -135,6 +140,7 @@ public partial class WebcamPopup
             }));
         }
         var shown = RecentToShow(recent, status, _recentCount);
+        if (_dragRow == null)
         Replace(_recentRows, shown.Select(f =>
         {
             var d = details.GetValueOrDefault(f.Path);
@@ -301,48 +307,178 @@ public partial class WebcamPopup
         }
     }
 
-    private void OnQueueDragStarted(object sender, DragStartedEventArgs e)
+    // ---- dragging: queued jobs to reorder them, recent uploads into the queue -------------
+
+
+    private void OnRowMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not QueueRow row)
+        // Buttons in the row (✕, ＋) take their own clicks before this sees them.
+        if (sender is FrameworkElement { DataContext: QueueRow row } element)
+            (_pressRow, _pressElement, _pressPoint) = (row, element, e.GetPosition(QueueContent));
+    }
+
+    private void OnRowMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_pressRow == null || e.LeftButton != MouseButtonState.Pressed)
             return;
-        _dragRow = row;
-        _dragFrom = _queueRows.IndexOf(row);
-        _dragContainer = QueueList.ItemContainerGenerator.ContainerFromItem(row) as FrameworkElement;
+        var at = e.GetPosition(QueueContent);
+        if (_dragRow == null)
+        {
+            if (Math.Abs(at.Y - _pressPoint.Y) < SystemParameters.MinimumVerticalDragDistance
+                && Math.Abs(at.X - _pressPoint.X) < SystemParameters.MinimumHorizontalDragDistance)
+                return; // still a click
+            StartDrag();
+        }
+        // Near the top or bottom of the list, scroll it along.
+        double y = e.GetPosition(QueueScroll).Y;
+        if (y < 24)
+            QueueScroll.ScrollToVerticalOffset(QueueScroll.VerticalOffset - 8);
+        else if (y > QueueScroll.ActualHeight - 24)
+            QueueScroll.ScrollToVerticalOffset(QueueScroll.VerticalOffset + 8);
+        at = e.GetPosition(QueueContent);
+        _dropIndex = DropIndex(at.Y);
+        OpenGap();
+        // The row follows the mouse (a recent upload's list may have moved down to make room).
+        if (_dragContainer?.RenderTransform is TranslateTransform move)
+            move.Y = at.Y - _pressPoint.Y - (_dragFromQueue ? 0 : BelowQueueShift.Y);
+    }
+
+    private TranslateTransform BelowQueueShift => (TranslateTransform)BelowQueue.RenderTransform;
+
+    private void StartDrag()
+    {
+        _dragRow = _pressRow;
+        _dragFromQueue = _queueRows.Contains(_dragRow!);
+        var list = _dragFromQueue ? QueueList : RecentList;
+        _dragContainer = list.ItemContainerGenerator.ContainerFromItem(_dragRow!) as FrameworkElement;
         if (_dragContainer != null)
         {
             _dragContainer.RenderTransform = new TranslateTransform();
             Panel.SetZIndex(_dragContainer, 1);
             _dragContainer.Opacity = 0.85;
         }
+        _pressElement?.CaptureMouse(); // keep getting the mouse as the row moves away from under it
+        Mouse.OverrideCursor = HandCursors.Closed; // holding it
     }
 
-    private void OnQueueDragDelta(object sender, DragDeltaEventArgs e)
+    /// <summary>
+    /// The queued rows other than the one being dragged, with where they'd be without the gap
+    /// (layout positions, not where they've slid to).
+    /// </summary>
+    private List<(QueueRow Row, FrameworkElement Container, double Top, double Bottom)> OtherQueueRows()
     {
-        // The row moves with the mouse; the others stay put until it's dropped.
-        if (_dragContainer?.RenderTransform is TranslateTransform move)
-            move.Y += e.VerticalChange;
-    }
-
-    private async void OnQueueDragCompleted(object sender, DragCompletedEventArgs e)
-    {
-        if (_dragRow == null || _dragContainer == null)
+        var rows = new List<(QueueRow, FrameworkElement, double, double)>();
+        double listTop = QueueList.TranslatePoint(new Point(0, 0), QueueContent).Y;
+        foreach (var row in _queueRows)
         {
-            _dragRow = null;
-            return;
+            if (row == _dragRow || QueueList.ItemContainerGenerator.ContainerFromItem(row) is not FrameworkElement c)
+                continue;
+            double top = listTop + VisualTreeHelper.GetOffset(c).Y;
+            rows.Add((row, c, top, top + c.ActualHeight));
         }
-        double moved = (_dragContainer.RenderTransform as TranslateTransform)?.Y ?? 0;
-        double rowHeight = Math.Max(1, _dragContainer.ActualHeight);
-        int to = Math.Clamp(_dragFrom + (int)Math.Round(moved / rowHeight), 0, _queueRows.Count - 1);
-        _dragContainer.RenderTransform = Transform.Identity;
-        _dragContainer.Opacity = 1;
-        Panel.SetZIndex(_dragContainer, 0);
-        int from = _dragFrom;
-        (_dragRow, _dragContainer) = (null, null);
-        if (to == from)
+        return rows;
+    }
+
+    /// <summary>Where the dragged row would land: before the first queued row whose middle is below the mouse.</summary>
+    private int DropIndex(double y)
+    {
+        // A recent upload only goes in when it's over the queue (above the recent uploads' heading).
+        if (!_dragFromQueue && y > RecentHeading.TranslatePoint(new Point(0, 0), QueueContent).Y + RecentHeading.ActualHeight)
+            return -1;
+        var others = OtherQueueRows();
+        int index = others.Count(r => (r.Top + r.Bottom) / 2 < y);
+        // Dropping a queued job back where it was changes nothing.
+        return _dragFromQueue && index == _queueRows.IndexOf(_dragRow!) ? -1 : index;
+    }
+
+    /// <summary>
+    /// Opens a gap in the queue where the dragged row will land: the rows after it slide down
+    /// (and a queued job's old place closes up); a recent upload pushes everything below the
+    /// queue down too.
+    /// </summary>
+    private void OpenGap()
+    {
+        double height = _dragContainer?.ActualHeight ?? 0;
+        int from = _dragFromQueue ? _queueRows.IndexOf(_dragRow!) : -1;
+        int to = _dropIndex >= 0 ? _dropIndex : from; // no gap: everything back in place
+        var others = OtherQueueRows();
+        for (int i = 0; i < others.Count; i++)
+        {
+            // Without the dragged job, rows after its old place move up; at or after the gap, down.
+            double shift = (from >= 0 && i >= from ? -height : 0) + (to >= 0 && i >= to ? height : 0);
+            Slide(others[i].Container, shift);
+        }
+        if (!_dragFromQueue)
+            BelowQueueShift.Y = _dropIndex >= 0 ? height : 0;
+    }
+
+    /// <summary>Slides a row to y (relative to its place), quickly; the target is kept in Tag.</summary>
+    private static void Slide(FrameworkElement row, double y)
+    {
+        if (row.Tag is double target && target == y)
+            return; // already there or on its way
+        if (row.RenderTransform is not TranslateTransform move)
+            row.RenderTransform = move = new TranslateTransform();
+        row.Tag = y;
+        move.BeginAnimation(TranslateTransform.YProperty,
+                           new System.Windows.Media.Animation.DoubleAnimation(y, TimeSpan.FromMilliseconds(90)));
+    }
+
+    private void OnRowMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_dragRow != null)
+            FinishDrag(drop: true);
+        _pressRow = null;
+    }
+
+    // E.g. the window lost focus mid-drag: put the row back.
+    private void OnRowLostCapture(object sender, MouseEventArgs e)
+    {
+        if (_dragRow != null)
+            FinishDrag(drop: false);
+    }
+
+    private async void FinishDrag(bool drop)
+    {
+        var row = _dragRow!;
+        bool fromQueue = _dragFromQueue;
+        int to = _dropIndex;
+        if (_dragContainer != null)
+        {
+            _dragContainer.RenderTransform = Transform.Identity;
+            _dragContainer.Opacity = 1;
+            Panel.SetZIndex(_dragContainer, 0);
+        }
+        // Close the gap; the lists then show the new order.
+        foreach (var other in OtherQueueRows())
+            (other.Container.RenderTransform, other.Container.Tag) = (Transform.Identity, null);
+        BelowQueueShift.Y = 0;
+        (_dragRow, _dragContainer, _pressRow, _dropIndex) = (null, null, null, -1);
+        Mouse.OverrideCursor = null;
+        _pressElement?.ReleaseMouseCapture();
+        if (!drop || to < 0)
             return;
-        _queueRows.Move(from, to);
-        var order = _queueRows.Select(r => r.Path).ToList();
-        await QueueActionAsync(q => q.ReorderQueueAsync(order, _lifetime.Token), "Couldn't reorder");
+        if (fromQueue)
+        {
+            _queueRows.Move(_queueRows.IndexOf(row), to);
+            var order = _queueRows.Select(r => r.Path).ToList();
+            await QueueActionAsync(q => q.ReorderQueueAsync(order, _lifetime.Token), "Couldn't reorder");
+        }
+        else
+        {
+            // Shown in place at once; the printer adds it at the end, then it's moved there.
+            _recentRows.Remove(row);
+            _queueRows.Insert(to, row);
+            QueueEmpty.Visibility = Visibility.Collapsed;
+            bool last = to == _queueRows.Count - 1;
+            var order = _queueRows.Select(r => r.Path).ToList();
+            await QueueActionAsync(async q =>
+            {
+                await q.AddToQueueAsync(row.Path, _lifetime.Token);
+                if (!last)
+                    await q.ReorderQueueAsync(order, _lifetime.Token);
+            }, "Couldn't add it");
+        }
     }
 
     /// <summary>Runs a change on the printer, then refreshes; a failure shows in the header.</summary>

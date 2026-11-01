@@ -24,6 +24,10 @@ public partial class SettingsWindow : Window
     // The stats strip picker: the printer's other sensors (once reached), and whether the user changed
     // the tiles (if not, the default stays the default, with the chamber if the printer has one).
     private IReadOnlyList<string> _sensors = [];
+    // U1 Extended: whether the printer serves its touchscreen (Remote Screen on); null until asked.
+    private bool? _touchscreen;
+    // The second view's entry for the U1's touchscreen (camera names can't start with ':').
+    private const string Touchscreen = ":touchscreen";
     private bool _tilesChanged;
 
     /// <summary>The saved config, or null if the user cancelled.</summary>
@@ -44,7 +48,6 @@ public partial class SettingsWindow : Window
         }
 
         (config.IsBambu ? BambuRadio : config.IsU1 ? U1Radio : KlipperRadio).IsChecked = true;
-        TouchscreenCheck.IsChecked = config.U1Touchscreen;
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
@@ -52,7 +55,7 @@ public partial class SettingsWindow : Window
         // Sensors already chosen stay listed even before the printer answers.
         _sensors = config.StatsTiles?.Where(StatusText.IsSensorTile).ToList() ?? [];
         FillStatsPicker(config.StatsTiles ?? StatusText.DefaultTiles(null));
-        FillSources(null, config.WebcamName, config.SecondViewName);
+        FillSources(null, config.WebcamName, config.IsU1 && config.U1Touchscreen ? Touchscreen : config.SecondViewName);
         FillStreams(CameraView.Main, null, config.WebcamStream);
         FillStreams(CameraView.Second, null, config.SecondViewStream);
         IpBox.Text = config.BambuIp;
@@ -75,14 +78,16 @@ public partial class SettingsWindow : Window
 
     private void OnTypeChanged(object sender, RoutedEventArgs e)
     {
-        if (KlipperPanel == null || TouchscreenCheck == null)
+        if (KlipperPanel == null || KlipperOptions == null || SecondViewCombo == null)
             return; // still loading
-        KlipperPanel.Visibility = IsBambu ? Visibility.Collapsed : Visibility.Visible;
+        KlipperPanel.Visibility = KlipperOptions.Visibility = IsBambu ? Visibility.Collapsed : Visibility.Visible;
         BambuPanel.Visibility = IsBambu ? Visibility.Visible : Visibility.Collapsed;
-        // A U1 has its touchscreen where Klipper has a second camera.
-        var second = IsU1 ? Visibility.Collapsed : Visibility.Visible;
-        SecondViewLabel.Visibility = SecondViewCombo.Visibility = SecondViewStreamCombo.Visibility = second;
-        TouchscreenCheck.Visibility = IsU1 ? Visibility.Visible : Visibility.Collapsed;
+        // A U1 lists its touchscreen as a second view, and picks it unless something else is chosen.
+        string second = Selected(SecondViewCombo);
+        second = IsU1 ? (second.Length == 0 && _touchscreen != false ? Touchscreen : second) : (second == Touchscreen ? "" : second);
+        FillSources(_webcams, Selected(CameraCombo), second);
+        if (IsU1 && _touchscreen == null && _reached != null)
+            _ = CheckTouchscreenAsync(_reached);
         AddressHint.Text = IsU1
             ? "The printer's address, e.g. 192.168.1.60"
             : "The address you open Mainsail or Fluidd at, e.g. mainsail.local or 192.168.1.50";
@@ -92,20 +97,16 @@ public partial class SettingsWindow : Window
 
     private void UpdateSourcesHint()
     {
-        if (IsU1)
-            SourcesHint.Text = "The touchscreen needs paxx12's extended firmware with Remote Screen turned on " +
-                               "(http://<printer>/firmware-config). In the popup, a button switches to it; touch starts " +
-                               "locked, so the screen is view-only until you unlock it.";
-        else if (_webcams == null)
+        if (_webcams == null)
             SourcesHint.Text = "Test connection lists the printer's cameras and the streams each one offers. " +
-                               "The webcam popup gets a button to switch to the second camera.";
+                               "The webcam popup gets a button to switch to the second view.";
         else if (_webcams.Count == 0)
             SourcesHint.Text = "The printer has no cameras set up (in Mainsail/Fluidd: Settings → Webcams).";
-        else if (MoonrakerBackend.LooksLikeU1(_webcams))
+        else if (!IsU1 && MoonrakerBackend.LooksLikeU1(_webcams))
             SourcesHint.Text = "This looks like a Snapmaker U1 with the extended firmware: choose U1 Extended above to use its touchscreen.";
         else
             SourcesHint.Text = "Next to each camera: how it's fetched (only what it offers is listed). " +
-                               "The webcam popup gets a button to switch to the second camera.";
+                               "The webcam popup gets a button to switch to the second view.";
     }
 
     private void OnShowApiKeyChanged(object sender, RoutedEventArgs e) =>
@@ -159,10 +160,11 @@ public partial class SettingsWindow : Window
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
             config.PrintQueue = QueueCheck.IsChecked == true;
             config.WebcamName = Selected(CameraCombo);
-            config.SecondViewName = Selected(SecondViewCombo);
+            string second = Selected(SecondViewCombo);
+            config.U1Touchscreen = IsU1 && second == Touchscreen;
+            config.SecondViewName = second == Touchscreen ? "" : second;
             config.WebcamStream = Selected(CameraStreamCombo);
             config.SecondViewStream = Selected(SecondViewStreamCombo);
-            config.U1Touchscreen = TouchscreenCheck.IsChecked == true;
             if (_tilesChanged)
                 config.StatsTiles = ChosenTiles();
         }
@@ -212,7 +214,14 @@ public partial class SettingsWindow : Window
         }
         catch (Exception) { return; }
         await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckPrintQueueAsync(config),
-                           LoadSensorsAsync(config));
+                           LoadSensorsAsync(config), IsU1 ? CheckTouchscreenAsync(config) : Task.CompletedTask);
+    }
+
+    /// <summary>A U1 Extended lists its touchscreen only if the printer serves it (Remote Screen turned on).</summary>
+    private async Task CheckTouchscreenAsync(AppConfig config)
+    {
+        _touchscreen = await Task.Run(() => PrinterBackends.HasTouchscreenAsync(config));
+        FillSources(_webcams, Selected(CameraCombo), Selected(SecondViewCombo));
     }
 
     // ---- stats strip -------------------------------------------------------------
@@ -231,26 +240,80 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// A checkbox per tile, in the strip's order: nozzle, bed, the printer's other sensors, then
-    /// progress, layer and time left.
+    /// The strip as it'll look: six slots, left to right, each with the label it'll show. Clicking
+    /// a slot picks what goes in it; picking a tile shown in another slot swaps the two.
     /// </summary>
     private void FillStatsPicker(IEnumerable<string> chosen)
     {
-        var on = chosen.ToHashSet();
-        StatsPicker.Children.Clear();
-        string[] all = [StatusText.Nozzle, StatusText.Bed, .. _sensors,
-                        StatusText.Progress, StatusText.Layer, StatusText.TimeLeft];
-        foreach (string tile in all)
+        _chosenTiles = chosen.Take(StatusText.MaxStatsTiles).ToList();
+        StatsSlots.Children.Clear();
+        for (int i = 0; i < StatusText.MaxStatsTiles; i++)
         {
-            var box = new CheckBox
+            string? tile = i < _chosenTiles.Count ? _chosenTiles[i] : null;
+            var label = new TextBlock
             {
-                Content = TileName(tile), Tag = tile, IsChecked = on.Contains(tile), Margin = new Thickness(0, 0, 16, 6),
-                ToolTip = StatusText.IsSensorTile(tile) ? $"Klipper's [{tile}]" : null,
+                Text = tile == null ? "Add" : StatusText.TileLabel(tile),
+                FontSize = 11, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
+                Opacity = tile == null ? 0.55 : 1,
             };
-            box.Click += (_, _) => { _tilesChanged = true; UpdateStatsPicker(); };
-            StatsPicker.Children.Add(box);
+            var slot = new Button
+            {
+                Style = (Style)FindResource("StatsSlot"), Content = label, Tag = i,
+                ToolTip = tile == null ? "Add a tile"
+                    : StatusText.IsSensorTile(tile) ? $"{TileName(tile)} (Klipper's [{tile}])" : TileName(tile),
+            };
+            slot.Click += OnStatsSlotClick;
+            StatsSlots.Children.Add(slot);
         }
-        UpdateStatsPicker();
+        StatsHint.Text = "Click a tile to change it. Picking one shown elsewhere swaps the two."
+                         + (_sensors.Count == 0 ? " Test connection lists the printer's other sensors." : "");
+    }
+
+    /// <summary>A menu of everything a slot can show: temperatures, then the print's progress, then none.</summary>
+    private void OnStatsSlotClick(object sender, RoutedEventArgs e)
+    {
+        var slot = (Button)sender;
+        int index = (int)slot.Tag;
+        string? current = index < _chosenTiles.Count ? _chosenTiles[index] : null;
+        var menu = new ContextMenu { PlacementTarget = slot, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        void Add(string? tile)
+        {
+            var item = new MenuItem { Header = tile == null ? "None" : TileName(tile), IsCheckable = true,
+                                     IsChecked = tile != null && tile == current };
+            int elsewhere = tile == null ? -1 : _chosenTiles.IndexOf(tile);
+            if (elsewhere >= 0 && elsewhere != index)
+                item.InputGestureText = $"tile {elsewhere + 1}"; // picking it swaps
+            item.Click += (_, _) => PickTile(index, tile);
+            menu.Items.Add(item);
+        }
+        Add(StatusText.Nozzle);
+        Add(StatusText.Bed);
+        foreach (string sensor in _sensors)
+            Add(sensor);
+        menu.Items.Add(new Separator());
+        Add(StatusText.Progress);
+        Add(StatusText.Layer);
+        Add(StatusText.TimeLeft);
+        if (current != null)
+        {
+            menu.Items.Add(new Separator());
+            Add(null);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void PickTile(int index, string? tile)
+    {
+        var tiles = new List<string?>(_chosenTiles);
+        while (tiles.Count <= index)
+            tiles.Add(null);
+        int elsewhere = tile == null ? -1 : tiles.IndexOf(tile);
+        if (elsewhere >= 0)
+            tiles[elsewhere] = tiles[index]; // swap (or just move it, from an empty slot)
+        tiles[index] = tile;
+        _tilesChanged = true;
+        // Empty slots close up, as in the strip.
+        FillStatsPicker(tiles.OfType<string>());
     }
 
     private static string TileName(string tile) => tile switch
@@ -260,21 +323,14 @@ public partial class SettingsWindow : Window
         StatusText.Progress => "Progress",
         StatusText.Layer => "Layer",
         StatusText.TimeLeft => "Time left",
-        _ => StatusText.SensorName(tile).Replace('_', ' '),
+        // "beacon_coil" -> "Beacon coil"; names in capitals ("MCU") stay as they are.
+        _ => StatusText.SensorName(tile).Replace('_', ' ') is { Length: > 0 } name
+             ? char.ToUpperInvariant(name[0]) + name[1..] : tile,
     };
 
-    private List<string> ChosenTiles() =>
-        StatsPicker.Children.OfType<CheckBox>().Where(b => b.IsChecked == true).Select(b => (string)b.Tag).ToList();
+    private List<string> _chosenTiles = [];
 
-    /// <summary>At most 6 (there's no room for more): once there are, the rest are greyed out.</summary>
-    private void UpdateStatsPicker()
-    {
-        int count = ChosenTiles().Count;
-        foreach (var box in StatsPicker.Children.OfType<CheckBox>())
-            box.IsEnabled = box.IsChecked == true || count < StatusText.MaxStatsTiles;
-        StatsHint.Text = (count == 0 ? "None: the popup shows no stats strip." : $"{count} of {StatusText.MaxStatsTiles}, shown in this order.")
-                         + (_sensors.Count == 0 ? " Test connection lists the printer's other sensors too." : "");
-    }
+    private List<string> ChosenTiles() => _chosenTiles;
 
     /// <summary>The queue option only works if the printer's Moonraker has the job queue (it's optional).</summary>
     private async Task CheckPrintQueueAsync(AppConfig config)
@@ -300,7 +356,7 @@ public partial class SettingsWindow : Window
         string camera = Selected(view == CameraView.Main ? CameraCombo : SecondViewCombo);
         var streamCombo = view == CameraView.Main ? CameraStreamCombo : SecondViewStreamCombo;
         int request = ++_streamRequests[(int)view];
-        if (_reached == null || (view == CameraView.Second && camera.Length == 0))
+        if (_reached == null || (view == CameraView.Second && camera is "" or Touchscreen))
         {
             FillStreams(view, [], Selected(streamCombo));
             return;
@@ -361,7 +417,7 @@ public partial class SettingsWindow : Window
         var items = StreamItems(kinds, selected);
         combo.ItemsSource = items;
         combo.SelectedItem = items.Find(i => i.Name == (StreamKinds.Parse(selected) is { } k ? StreamKinds.ToConfig(k) : "")) ?? items[0];
-        combo.IsEnabled = view == CameraView.Main || Selected(SecondViewCombo).Length > 0;
+        combo.IsEnabled = view == CameraView.Main || Selected(SecondViewCombo) is not ("" or Touchscreen);
     }
 
     /// <summary>
@@ -392,7 +448,13 @@ public partial class SettingsWindow : Window
             : "Automatic";
         _filling = true;
         Fill(CameraCombo, Items(webcams, new SourceItem("", automatic), camera), camera);
-        Fill(SecondViewCombo, Items(webcams, new SourceItem("", "None"), secondView), secondView);
+        var second = Items(webcams, new SourceItem("", "None"), secondView == Touchscreen ? "" : secondView);
+        // A U1 Extended's touchscreen, unless the printer is known not to serve it (then it's None).
+        if (IsU1 && _touchscreen != false)
+            second.Insert(1, new SourceItem(Touchscreen, "Touchscreen",
+                "The printer's own screen, live, from the extended firmware's Remote Screen. Touch starts " +
+                "locked in the popup, so it's view-only until you unlock it."));
+        Fill(SecondViewCombo, second, secondView);
         _filling = false;
         UpdateSourcesHint();
     }

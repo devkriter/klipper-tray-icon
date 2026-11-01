@@ -23,9 +23,9 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   press anything). See [Snapmaker U1 Support](#snapmaker-u1-support).
 - **Print queue** (Klipper, optional): a button in the popup's title bar swaps the console for
   the printer's print queue (Moonraker's job queue, as in Mainsail): thumbnails (hover one for a
-  larger preview), drag to reorder, ✕ to remove, ＋ to add one of the recent uploads (the ones not
-  queued yet, with *Load more* for older files), and a small *Start next* button that asks for a
-  second click. Off by default; turn it on in Settings.
+  larger preview), drag to reorder, ✕ to remove. Below it are the recent uploads not queued yet
+  (*Load more* for older ones): ＋ adds one at the end, or drag it into the queue where you want it.
+  A small *Start next* button asks for a second click. Off by default; turn it on in Settings.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
@@ -42,8 +42,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   *Test connection* button.
 - **Instant webcam popup**: left-click the tray icon. A recent snapshot appears immediately while
   the live stream connects.
-- **Pin it as a window**: the pin button keeps the popup open like a normal window. Drag it from
-  anywhere, resize it, or snap it to the side of the screen; in tall windows the console moves
+- **Pin it as a window**: the pin button keeps the popup open like a normal window. Drag it by the
+  title bar, resize it, or snap it to the side of the screen; in tall windows the console moves
   below the video.
 - **Native Windows app**: built with C# / .NET and the Windows 11 look, follows light/dark mode.
 - **Portable**: Unzip and run - no installation, nothing else to install (the .NET runtime is
@@ -93,8 +93,9 @@ your PC.
 1. Install paxx12's extended firmware on the U1. To see the touchscreen, turn on **Remote Screen**
    in the firmware's settings page (`http://<printer>/firmware-config`).
 2. On first run (or in **Settings**), choose **U1 Extended** and enter the printer's address.
-3. Leave **Show the printer's touchscreen in the webcam popup, and let me use it** ticked. The
-   camera can stay on Automatic.
+3. **Second view** is **Touchscreen** (picked for you once Settings sees the printer serves its
+   screen; it's only listed then). The camera can stay on Automatic. You can pick a second camera
+   instead, or None.
 4. In the webcam popup, the view button in the title bar switches between the camera and the
    touchscreen. Touch starts **locked** (view only): click the lock to use the screen, and the
    picture gets an amber outline while your clicks go to the printer. It locks again when the
@@ -207,7 +208,12 @@ from elsewhere (Tailscale, VPN, internet) or Moonraker has been set to require l
 running `~/moonraker/scripts/fetch-apikey.sh` on the printer.
 
 ## License
-MIT
+GPL-3.0: see [LICENSE](LICENSE). Versions up to 2.8.0 were released under MIT; the switch came
+with the print queue's grab cursors below, which are GPL-3.0.
+
+The print queue's open and closed hand cursors are "Pan" and "Grabbing" from
+[XCursor Pro](https://github.com/ful1e5/XCursor-pro) (Light) by Abdulkaiz Khatri, GPL-3.0,
+unchanged (`src/KlipperTrayIcon/UI/Cursors/`).
 
 ## Disclaimer
 This software was written with the assistance of an AI coding assistant.

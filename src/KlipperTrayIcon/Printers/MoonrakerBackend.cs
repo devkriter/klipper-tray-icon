@@ -501,6 +501,10 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
         ? "Turn on Remote Screen in the printer's firmware settings (/firmware-config)"
         : null;
 
+    /// <summary>Whether the printer serves its touchscreen (a U1 with Remote Screen on): a picture at /screen/snapshot.</summary>
+    public async Task<bool> HasRemoteScreenAsync(CancellationToken ct) =>
+        (await FetchImageAsync(BaseUrl + "/screen/snapshot", null, TimeSpan.FromSeconds(3), ct)).Image != null;
+
     /// <summary>
     /// Whether a webcam list looks like a Snapmaker U1 with paxx12's firmware (its
     /// touchscreen is an iframe at /screen/), for Settings to suggest the U1 type.

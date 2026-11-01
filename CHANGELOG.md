@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.9.0] - 2026-10-31
+### Changed
+- Settings › Stats strip is drawn as the strip itself: six slots, left to right, with the labels
+  the popup shows. Click one to pick what goes in it (temperatures, progress, layer, time left or
+  none); picking a tile shown in another slot swaps the two, which is how you reorder.
+- Settings: *Test connection* sits right under the address and API key (or the Bambu details),
+  before the camera and popup options.
+- Settings, U1 Extended: the touchscreen is a choice in the *Second view* list (with a line saying
+  what it is), instead of a checkbox with a long explanation. It's only listed when the printer
+  serves its screen (Remote Screen on), and picked by default then; a U1 can also have a second
+  camera as its second view now.
+- Settings: less space between the printer section and General.
+- Print queue: drag a queued job by any part of its row to reorder it, and drag a recent upload
+  into the queue to put it exactly there (＋ still adds it at the end). The queue opens a gap where
+  the row will land. The grip is gone: an open hand cursor over a row shows it can be picked up,
+  and a closed one while it's held (XCursor Pro's Light "Pan" and "Grabbing": white, like
+  Windows' default arrow, and 32 to 128 px, so they're sharp at any display scale).
+- The webcam popup moves only when dragged by its title bar, so dragging in the print queue or the
+  recent uploads doesn't take the window with it.
+
+### License
+- The app is now GPL-3.0 (was MIT), as the hand cursors from XCursor Pro are GPL-3.0. The release
+  includes the license as LICENSE.txt.
+
 ## [2.8.0] - 2026-10-31
 ### Added
 - Preparing to print: from the start of a print until its first extrusion (start macro, heating,

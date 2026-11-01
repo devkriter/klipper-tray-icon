@@ -113,8 +113,6 @@ public partial class WebcamPopup : Window
         // The decoder only converts H.264 as big as the picture is shown.
         VideoImage.SizeChanged += (_, _) => ReportVideoWidth();
         DpiChanged += (_, _) => ReportVideoWidth();
-        // handledEventsToo: the console's ScrollViewer marks clicks handled.
-        AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnDragAnywhere), handledEventsToo: true);
         KeyDown += (_, e) => { if (e.Key == Key.Escape) HidePopup(); };
         // Make the native window now, and render it once off-screen, so the
         // first real show doesn't pay for window creation or first-render setup.
@@ -253,31 +251,6 @@ public partial class WebcamPopup : Window
             Placeholder.Visibility = Visibility.Visible;
             SetBadge(null);
         }
-    }
-
-    /// <summary>Nothing in the popup takes clicks except its buttons, so it drags from anywhere.</summary>
-    private void OnDragAnywhere(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ButtonState != MouseButtonState.Pressed || IsInButton(e.OriginalSource as DependencyObject))
-            return;
-        if (TouchActive && e.OriginalSource == VideoImage)
-            return; // a tap on the printer's screen, not a drag
-        if (e.ClickCount == 2)
-        {
-            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-            return;
-        }
-        try { DragMove(); } // the native move loop: dragging to a screen edge snaps
-        catch (InvalidOperationException) { }
-    }
-
-    private static bool IsInButton(DependencyObject? element)
-    {
-        for (; element != null; element = element is Visual or System.Windows.Media.Media3D.Visual3D
-                                     ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element))
-            if (element is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Controls.Primitives.Thumb)
-                return true;
-        return false;
     }
 
     private void ReportVideoWidth()

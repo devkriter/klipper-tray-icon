@@ -41,6 +41,11 @@ public partial class WebcamPopup
     private bool _startArmed;
     private readonly DispatcherTimer _disarm = new() { Interval = StartConfirmTime };
     private readonly Dictionary<string, (byte[] Bytes, BitmapSource Image)> _thumbnails = new();
+    // The last refresh's uploads and file details, so a change can be shown before the printer confirms it.
+    private IReadOnlyList<GcodeFile> _recentFiles = [];
+    private Dictionary<string, GcodeDetails> _details = new();
+    // Counted up by each change: a refresh that started before one would undo it on screen for a moment.
+    private int _queueEdits, _queueBusy;
     // Dragging a row: pressed (not yet moved far enough to be a drag), then dragged.
     private QueueRow? _pressRow;
     private FrameworkElement? _pressElement;
@@ -87,7 +92,7 @@ public partial class WebcamPopup
         bool filesKnown = false;
         while (!ct.IsCancellationRequested)
         {
-            bool showing = await Dispatcher.InvokeAsync(() => IsVisible && _queueShown);
+            var (showing, edits) = await Dispatcher.InvokeAsync(() => (IsVisible && _queueShown, _queueEdits));
             if (!_queueWake && !(showing && sinceQueue.Elapsed >= QueueRefresh))
             {
                 try { await Task.Delay(200, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
@@ -108,15 +113,16 @@ public partial class WebcamPopup
                     sinceFiles.Restart();
                 }
                 var details = new Dictionary<string, GcodeDetails>();
+                // One more than is shown: the upload that moves up when one is added to the queue.
                 var paths = status.Jobs.Select(j => j.Path)
-                    .Concat(RecentToShow(recent, status, _recentCount).Select(f => f.Path));
+                    .Concat(RecentToShow(recent, status, _recentCount + 1).Select(f => f.Path));
                 foreach (string path in paths.Distinct())
                 {
                     try { details[path] = await _queue.GetFileDetailsAsync(path, ct).ConfigureAwait(false); }
                     catch (Exception) when (!ct.IsCancellationRequested) { details[path] = new GcodeDetails(null, null); }
                 }
                 var files = recent;
-                await Dispatcher.InvokeAsync(() => ShowQueue(status, files, details));
+                await Dispatcher.InvokeAsync(() => ShowQueue(status, files, details, edits));
             }
             catch (OperationCanceledException) { break; }
             catch (Exception e)
@@ -127,38 +133,54 @@ public partial class WebcamPopup
         }
     }
 
-    private void ShowQueue(QueueStatus status, IReadOnlyList<GcodeFile> recent, Dictionary<string, GcodeDetails> details)
+    private void ShowQueue(QueueStatus status, IReadOnlyList<GcodeFile> recent, Dictionary<string, GcodeDetails> details, int edits)
     {
-        _queueStatus = status;
-        if (_dragRow == null) // don't pull the list out from under a drag
+        if (edits != _queueEdits || _queueBusy > 0)
+            return; // from before a change: the refresh after it shows it
+        (_queueStatus, _recentFiles, _details) = (status, recent, details);
+        if (_dragRow == null) // don't pull the lists out from under a drag
         {
-            Replace(_queueRows, status.Jobs.Select(j =>
-            {
-                var d = details.GetValueOrDefault(j.Path);
-                return new QueueRow(j.Path, DisplayName(j.Path), d?.EstimatedSeconds is double t ? StatusText.FormatDuration(t) : "",
-                                    Image(j.Path, d?.Thumbnail), Image(j.Path + "#preview", d?.Preview), j.JobId);
-            }));
+            Replace(_queueRows, status.Jobs.Select(j => QueueRowFor(j.Path, j.JobId)));
+            ShowRecent();
         }
-        var shown = RecentToShow(recent, status, _recentCount);
-        if (_dragRow == null)
+        ShowQueueCount();
+        UpdateStartButton();
+    }
+
+    private QueueRow QueueRowFor(string path, string jobId)
+    {
+        var d = _details.GetValueOrDefault(path);
+        return new QueueRow(path, DisplayName(path), d?.EstimatedSeconds is double t ? StatusText.FormatDuration(t) : "",
+                            Image(path, d?.Thumbnail), Image(path + "#preview", d?.Preview), jobId);
+    }
+
+    /// <summary>The uploads that aren't in the queue as it's shown.</summary>
+    private void ShowRecent()
+    {
+        var queued = _queueRows.Select(r => r.Path).ToHashSet();
+        var shown = RecentToShow(_recentFiles, queued, _recentCount);
         Replace(_recentRows, shown.Select(f =>
         {
-            var d = details.GetValueOrDefault(f.Path);
+            var d = _details.GetValueOrDefault(f.Path);
             string age = Ago(DateTimeOffset.FromUnixTimeMilliseconds((long)(f.Modified * 1000)));
             string detail = d?.EstimatedSeconds is double t ? $"{StatusText.FormatDuration(t)} · {age}" : age;
             return new QueueRow(f.Path, DisplayName(f.Path), detail, Image(f.Path, d?.Thumbnail), Image(f.Path + "#preview", d?.Preview));
         }));
-        LoadMoreButton.Visibility = recent.Count(f => !IsQueued(f, status)) > shown.Count ? Visibility.Visible : Visibility.Collapsed;
-        QueueEmpty.Visibility = status.Jobs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        QueueHeader.Text = status.Jobs.Count switch { 0 => "QUEUE", 1 => "QUEUE · 1 job", var n => $"QUEUE · {n} jobs" };
-        UpdateStartButton();
+        LoadMoreButton.Visibility = _recentFiles.Count(f => !queued.Contains(f.Path)) > shown.Count ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ShowQueueCount()
+    {
+        QueueEmpty.Visibility = _queueRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        QueueHeader.Text = _queueRows.Count switch { 0 => "QUEUE", 1 => "QUEUE · 1 job", var n => $"QUEUE · {n} jobs" };
     }
 
     /// <summary>The newest uploads that aren't in the queue (removing one from the queue brings it back).</summary>
     internal static List<GcodeFile> RecentToShow(IReadOnlyList<GcodeFile> recent, QueueStatus status, int count) =>
-        recent.Where(f => !IsQueued(f, status)).Take(count).ToList();
+        RecentToShow(recent, status.Jobs.Select(j => j.Path).ToHashSet(), count);
 
-    private static bool IsQueued(GcodeFile file, QueueStatus status) => status.Jobs.Any(j => j.Path == file.Path);
+    private static List<GcodeFile> RecentToShow(IReadOnlyList<GcodeFile> recent, ISet<string> queued, int count) =>
+        recent.Where(f => !queued.Contains(f.Path)).Take(count).ToList();
 
     private void OnLoadMoreClick(object sender, RoutedEventArgs e)
     {
@@ -166,15 +188,30 @@ public partial class WebcamPopup
         _queueWake = true;
     }
 
-    /// <summary>Updates a list only if it changed, so it doesn't flicker every refresh.</summary>
-    private static void Replace(ObservableCollection<QueueRow> rows, IEnumerable<QueueRow> fresh)
+    /// <summary>
+    /// Makes a list match, touching only the rows that changed: the others keep their place on
+    /// screen, so nothing flickers or jumps.
+    /// </summary>
+    internal static void Replace<T>(ObservableCollection<T> rows, IEnumerable<T> fresh)
     {
         var list = fresh.ToList();
-        if (rows.SequenceEqual(list))
-            return;
-        rows.Clear();
-        foreach (var row in list)
-            rows.Add(row);
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (i < rows.Count && Equals(rows[i], list[i]))
+                continue;
+            int later = -1;
+            for (int j = i + 1; j < rows.Count && later < 0; j++)
+                if (Equals(rows[j], list[i]))
+                    later = j;
+            if (later >= 0)
+                rows.Move(later, i); // a row above it went, or it moved up
+            else if (i < rows.Count && !list.Contains(rows[i]))
+                rows[i] = list[i]; // the same place, changed (its time, or the job id once it's queued)
+            else
+                rows.Insert(i, list[i]);
+        }
+        while (rows.Count > list.Count)
+            rows.RemoveAt(rows.Count - 1);
     }
 
     /// <summary>Decodes a thumbnail once and reuses it, so unchanged rows stay equal and don't rebuild.</summary>
@@ -293,7 +330,10 @@ public partial class WebcamPopup
     {
         if ((sender as FrameworkElement)?.DataContext is QueueRow row)
         {
-            _recentRows.Remove(row); // at once; the next refresh shows it in the queue
+            // At once: it goes to the end of the queue and the next upload moves up into the list.
+            _queueRows.Add(QueueRowFor(row.Path, ""));
+            ShowRecent();
+            ShowQueueCount();
             await QueueActionAsync(q => q.AddToQueueAsync(row.Path, _lifetime.Token), "Couldn't add it");
         }
     }
@@ -302,7 +342,9 @@ public partial class WebcamPopup
     {
         if ((sender as FrameworkElement)?.DataContext is QueueRow row)
         {
-            _queueRows.Remove(row); // at once; the next refresh confirms it
+            _queueRows.Remove(row); // at once (back among the uploads); the next refresh confirms it
+            ShowRecent();
+            ShowQueueCount();
             await QueueActionAsync(q => q.RemoveFromQueueAsync(row.JobId, _lifetime.Token), "Couldn't remove it");
         }
     }
@@ -467,9 +509,9 @@ public partial class WebcamPopup
         else
         {
             // Shown in place at once; the printer adds it at the end, then it's moved there.
-            _recentRows.Remove(row);
-            _queueRows.Insert(to, row);
-            QueueEmpty.Visibility = Visibility.Collapsed;
+            _queueRows.Insert(to, QueueRowFor(row.Path, ""));
+            ShowRecent();
+            ShowQueueCount();
             bool last = to == _queueRows.Count - 1;
             var order = _queueRows.Select(r => r.Path).ToList();
             await QueueActionAsync(async q =>
@@ -481,18 +523,27 @@ public partial class WebcamPopup
         }
     }
 
-    /// <summary>Runs a change on the printer, then refreshes; a failure shows in the header.</summary>
+    /// <summary>
+    /// Runs a change on the printer, then refreshes (which also puts things back if it failed);
+    /// a failure shows in the header.
+    /// </summary>
     private async Task QueueActionAsync(Func<IPrintQueue, Task> action, string failure)
     {
-        try
+        Exception? error = null;
+        _queueEdits++;
+        _queueBusy++;
+        try { await Task.Run(() => action(_queue!)); }
+        catch (Exception e) when (!_lifetime.IsCancellationRequested) { error = e; }
+        finally
         {
-            await Task.Run(() => action(_queue!));
+            _queueBusy--;
+            _queueEdits++;
             _queueWake = true; // show the result now
         }
-        catch (Exception e) when (!_lifetime.IsCancellationRequested)
+        if (error != null)
         {
             // In the header for a few seconds, then the usual button or note again.
-            _actionError = $"{failure}: {_backend.DescribeError(e)}";
+            _actionError = $"{failure}: {_backend.DescribeError(error)}";
             UpdateStartButton();
             await Task.Delay(TimeSpan.FromSeconds(5));
             _actionError = null;

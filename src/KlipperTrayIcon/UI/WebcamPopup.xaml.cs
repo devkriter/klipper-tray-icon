@@ -811,6 +811,9 @@ internal sealed class ConsoleFeed
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     // Mainsail's filter settings are checked again this often while the popup is open.
     private static readonly TimeSpan FilterRefresh = TimeSpan.FromSeconds(30);
+    // After a failure, the next tries wait longer and longer (the last one repeats).
+    private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5),
+                                                      TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
 
     private readonly IPrinterBackend _backend;
     private ConsoleFilter? _filter;
@@ -821,6 +824,7 @@ internal sealed class ConsoleFeed
     private volatile bool _active;
     private volatile bool _wake = true;
     private bool _hasLines;
+    private ConsoleLine? _errorLine; // "Console unavailable", at the end until it's back
 
     public ConsoleFeed(IPrinterBackend backend, System.Windows.Controls.ItemsControl list,
                        System.Windows.Controls.ScrollViewer scroll, System.Windows.Threading.Dispatcher ui, CancellationToken ct)
@@ -840,20 +844,35 @@ internal sealed class ConsoleFeed
     private async Task LoopAsync(CancellationToken ct)
     {
         double lastTime = 0;
-        string? lastError = null;
+        string? error = null; // why the last try failed
+        int failures = 0, secondsShown = 0;
+        var retryAt = DateTime.MinValue;
         bool reload = true; // fetch the whole history and start the list over
         var sinceLastPoll = System.Diagnostics.Stopwatch.StartNew();
         var sinceFilter = System.Diagnostics.Stopwatch.StartNew();
         while (!ct.IsCancellationRequested)
         {
-            bool due = _wake || (_active && sinceLastPoll.Elapsed >= PollInterval);
+            bool due = _wake || (_active && (error != null ? DateTime.UtcNow >= retryAt : sinceLastPoll.Elapsed >= PollInterval));
             if (!due)
             {
+                // Count down to the next try.
+                int seconds = Math.Max(1, (int)Math.Ceiling((retryAt - DateTime.UtcNow).TotalSeconds));
+                if (error != null && seconds != secondsShown)
+                {
+                    secondsShown = seconds;
+                    string text = $"Console unavailable: {error}. Retrying in {seconds} s";
+                    await _ui.InvokeAsync(() => ShowError(text));
+                }
                 try { await Task.Delay(100, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                 continue;
             }
             _wake = false;
             sinceLastPoll.Restart();
+            if (error != null)
+            {
+                string text = $"Console unavailable: {error}. Retrying…";
+                await _ui.InvokeAsync(() => ShowError(text));
+            }
             try
             {
                 if (_filterDue || sinceFilter.Elapsed >= FilterRefresh)
@@ -872,21 +891,23 @@ internal sealed class ConsoleFeed
                 if (fresh.Count > 0)
                     lastTime = fresh[^1].Time;
                 fresh.RemoveAll(e => !_filter!.Shows(e));
-                lastError = null;
-                bool startOver = reload;
+                bool startOver = reload, recovered = error != null;
                 reload = false;
-                if (fresh.Count > 0 || !_hasLines || startOver)
-                    await _ui.InvokeAsync(() => ShowEntries(fresh, startOver));
+                (error, failures) = (null, 0);
+                if (fresh.Count > 0 || !_hasLines || startOver || recovered)
+                    await _ui.InvokeAsync(() =>
+                    {
+                        ShowError(null); // back: the message goes
+                        ShowEntries(fresh, startOver);
+                    });
             }
             catch (OperationCanceledException) { break; }
             catch (Exception e)
             {
-                string message = _backend.DescribeError(e);
-                if (message != lastError)
-                {
-                    lastError = message;
-                    await _ui.InvokeAsync(() => Append(ConsoleLine.StatusMessage($"Console unavailable: {message}")));
-                }
+                error = _backend.DescribeError(e);
+                retryAt = DateTime.UtcNow + RetryDelays[Math.Min(failures, RetryDelays.Length - 1)];
+                failures++;
+                secondsShown = 0; // the countdown shows it
             }
         }
     }
@@ -913,6 +934,24 @@ internal sealed class ConsoleFeed
             _lines.RemoveAt(0);
         if (follow)
             _scroll.Dispatcher.InvokeAsync(_scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Shows or updates the one error line (null: removes it).</summary>
+    private void ShowError(string? text)
+    {
+        int at = _errorLine == null ? -1 : _lines.IndexOf(_errorLine);
+        if (text == null)
+        {
+            if (at >= 0)
+                _lines.RemoveAt(at);
+            _errorLine = null;
+            return;
+        }
+        _errorLine = ConsoleLine.StatusMessage(text);
+        if (at >= 0)
+            _lines[at] = _errorLine;
+        else
+            Append(_errorLine);
     }
 
     private void Append(ConsoleLine line)

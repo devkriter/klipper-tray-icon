@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.9.2] - 2026-11-01
+### Fixed
+- Console: when the printer can't be reached, one line says so and counts down to the next try
+  ("Retrying in 5 s"), trying again after 3, 5, 10 and then every 30 seconds (at once when the
+  popup opens). It goes away as soon as the console is back, instead of staying in the log.
+- Print queue: adding a recent upload (＋ or by dragging) happens in one step: the file goes to the
+  queue and the next upload moves up into the list at once, instead of rows jumping around while
+  the printer confirms. Removing a job is shown at once the same way, and the lists only change
+  the rows that actually did on each refresh.
 ## [2.9.1] - 2026-10-31
 ### Changed
 - Settings: the API key (and Bambu access code) has an eye inside its field to show or hide it,

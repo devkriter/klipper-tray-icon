@@ -150,6 +150,38 @@ public class PrintQueueTests
     }
 
     [Theory]
+    [InlineData("ABCDE", "ABDEF")] // C added to the queue: F moves up
+    [InlineData("ABCDE", "NABCD")] // a new upload
+    [InlineData("ABDEF", "ABCDE")] // C back from the queue
+    [InlineData("ABC", "CAB")]
+    [InlineData("ABC", "")]
+    [InlineData("", "ABC")]
+    [InlineData("ABC", "XYZ")]
+    public void ListsChangeOnlyTheRowsThatDid(string before, string after)
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<char>(before);
+        int resets = 0, touched = 0;
+        rows.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                resets++;
+            touched++;
+        };
+        WebcamPopup.Replace(rows, after);
+        Assert.Equal(after, string.Concat(rows));
+        Assert.Equal(0, resets); // never rebuilt as a whole
+        Assert.True(touched <= Math.Max(before.Length, after.Length));
+    }
+
+    [Fact]
+    public void UnchangedListIsLeftAlone()
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<char>("ABC");
+        rows.CollectionChanged += (_, _) => Assert.Fail("changed");
+        WebcamPopup.Replace(rows, "ABC");
+    }
+
+    [Theory]
     [InlineData("Benchy.gcode", "Benchy")]
     [InlineData("parts/Clip_x4.GCODE", "Clip_x4")]
     [InlineData("notes.txt", "notes.txt")]

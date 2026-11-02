@@ -255,7 +255,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Text="Camera" Style="{StaticResource FieldLabel}" />
@@ -279,17 +278,33 @@
             <CheckBox x:Name="ConsoleCheck" Grid.Row="3" Grid.ColumnSpan="3" Margin="0,0,0,8"
                       Content="Show the Klipper console next to the webcam"
                       ToolTip="It hides the same messages as Mainsail's console, using Mainsail's console filters." />
-            <!-- Off by default: it can start prints. Greyed out if the printer has no queue. -->
-            <CheckBox x:Name="QueueCheck" Grid.Row="4" Grid.ColumnSpan="3" Margin="0,0,0,8"
-                      Content="Show the print queue in the webcam popup"
-                      ToolTip="Queued jobs with drag-to-reorder, recent uploads to add, and a button that starts the next print." />
 
             <!-- The stats strip at the top of the popup's side panel: up to 6 tiles, in this order. -->
             <!-- The strip, the whole width, as wide as there's room for: it's six tiles. -->
-            <TextBlock Grid.Row="5" Text="Stats strip" Style="{StaticResource FieldLabel}" Margin="0,6,16,6" />
-            <TextBlock x:Name="StatsHint" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+            <CheckBox x:Name="StatsCheck" Grid.Row="4" Content="Stats strip" VerticalAlignment="Center" Margin="0,6,16,6"
+                      Checked="OnStatsCheckChanged" Unchecked="OnStatsCheckChanged"
+                      ToolTip="The strip of key numbers above the console. Turn it off to hide it." />
+            <TextBlock x:Name="StatsHint" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
                        VerticalAlignment="Center" Margin="0" />
-            <UniformGrid x:Name="StatsSlots" Grid.Row="6" Grid.ColumnSpan="3" Rows="1" Margin="0,2,-6,4" />
+            <UniformGrid x:Name="StatsSlots" Grid.Row="5" Grid.ColumnSpan="3" Rows="1" Margin="0,2,-6,4" />
+        </Grid>
+
+        <Separator Margin="0,8,0,16" />
+
+        <!-- Optional features (Modules/), all off at first: turned on in the Modules window. -->
+        <TextBlock Text="Modules" Style="{StaticResource SectionHeader}" />
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock x:Name="ModulesSummary" TextWrapping="Wrap" />
+                <TextBlock Style="{StaticResource Hint}" Margin="0,2,0,0"
+                           Text="Extras for the webcam popup, off until you turn them on." />
+            </StackPanel>
+            <Button x:Name="ModulesButton" Grid.Column="1" Content="Manage modules…" Click="OnModulesClick"
+                    VerticalAlignment="Center" />
         </Grid>
 
         <Separator Margin="0,8,0,16" />

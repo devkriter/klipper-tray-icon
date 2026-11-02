@@ -30,12 +30,20 @@ public sealed class AppConfig
     /// <summary>How to fetch each: "h264", "mjpeg" or "snapshots"; empty picks the best one the camera offers.</summary>
     [JsonPropertyName("webcam_stream")] public string WebcamStream { get; set; } = "";
     [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
-    /// <summary>Show the print queue in the popup (Klipper / U1; can start prints, so off by default).</summary>
-    [JsonPropertyName("print_queue")] public bool PrintQueue { get; set; }
-    // The stats strip's tiles, up to 6: "nozzle", "bed", "progress", "layer", "time_left" and
-    // Klipper sensors by name ("temperature_fan chamber"). Null: the default, with a chamber
-    // sensor if the printer has one.
+    /// <summary>The modules turned on, by id (see Modules/ModuleRegistry.cs). All off at first.</summary>
+    [JsonPropertyName("modules")] public List<string> Modules { get; set; } = [];
+    /// <summary>Before modules (2.11 and earlier): the print queue's on/off. Read once, then saved as a module.</summary>
+    [JsonPropertyName("print_queue"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LegacyPrintQueue { get; set; }
+    /// <summary>The stats strip at the top of the popup's side panel; off hides it (the tiles stay as chosen).</summary>
+    [JsonPropertyName("show_stats")] public bool ShowStats { get; set; } = true;
+    // The stats strip's tiles, up to 6: "nozzle", "bed", "progress", "layer", "time_left", "elapsed",
+    // Klipper sensors by name ("temperature_fan chamber") and modules' tiles ("print_queue:queue").
+    // Null: the default, with a chamber sensor if the printer has one.
     [JsonPropertyName("stats_tiles")] public List<string>? StatsTiles { get; set; }
+
+    /// <summary>The strip's tiles as the printer is asked for them: none while the strip is hidden.</summary>
+    [JsonIgnore] public List<string>? ShownStatsTiles => ShowStats ? StatsTiles : [];
     /// <summary>Snapmaker U1: show its touchscreen (Remote Screen) in the popup, and send it taps.</summary>
     [JsonPropertyName("u1_touchscreen")] public bool U1Touchscreen { get; set; } = true;
 
@@ -48,6 +56,15 @@ public sealed class AppConfig
 
     [JsonIgnore]
     public TimeSpan UpdateInterval => TimeSpan.FromSeconds(Math.Clamp(UpdateIntervalSeconds, 1, 60));
+
+    /// <summary>Brings settings saved by older versions up to date.</summary>
+    internal AppConfig Upgrade()
+    {
+        if (LegacyPrintQueue == true && !Modules.Contains("print_queue"))
+            Modules.Add("print_queue");
+        LegacyPrintQueue = null;
+        return this;
+    }
 
     public AppConfig Clone() => JsonSerializer.Deserialize<AppConfig>(JsonSerializer.Serialize(this, ConfigStore.JsonOptions), ConfigStore.JsonOptions)!;
 }
@@ -74,7 +91,7 @@ public static class ConfigStore
         if (!File.Exists(ConfigPath))
             return null;
         string json = File.ReadAllText(ConfigPath);
-        return JsonSerializer.Deserialize<AppConfig>(json, JsonOptions) ?? new AppConfig();
+        return (JsonSerializer.Deserialize<AppConfig>(json, JsonOptions) ?? new AppConfig()).Upgrade();
     }
 
     public static void Save(AppConfig config)

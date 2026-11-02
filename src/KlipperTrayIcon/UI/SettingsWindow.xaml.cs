@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using KlipperTrayIcon.Modules;
 using KlipperTrayIcon.Printers;
 
 namespace KlipperTrayIcon.UI;
@@ -31,6 +32,12 @@ public partial class SettingsWindow : Window
     private const string Touchscreen = ":touchscreen";
     private bool _tilesChanged;
     private readonly Updater? _updater;
+    // The ids of the modules turned on (registry order), as picked in the Modules window.
+    private List<string> _modules = [];
+    // Why each module can't be used with the printer last reached (null: it can).
+    private readonly Dictionary<IModule, string?> _moduleProblems = new();
+    // Open while the user picks modules, to show what the printer says once it answers.
+    private ModulesWindow? _modulesWindow;
     private readonly Action? _update;
 
     /// <summary>The saved config, or null if the user cancelled.</summary>
@@ -56,9 +63,11 @@ public partial class SettingsWindow : Window
         UrlBox.Text = config.MoonrakerUrl;
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
-        QueueCheck.IsChecked = config.PrintQueue;
+        _modules = ModuleRegistry.All.Select(m => m.Id).Where(config.Modules.Contains).ToList();
+        ShowModules();
         // Sensors already chosen stay listed even before the printer answers.
         _sensors = config.StatsTiles?.Where(StatusText.IsSensorTile).ToList() ?? [];
+        StatsCheck.IsChecked = config.ShowStats;
         FillStatsPicker(config.StatsTiles ?? StatusText.DefaultTiles(null));
         FillSources(null, config.WebcamName, config.IsU1 && config.U1Touchscreen ? Touchscreen : config.SecondViewName);
         FillStreams(CameraView.Main, null, config.WebcamStream);
@@ -94,6 +103,8 @@ public partial class SettingsWindow : Window
             return; // still loading
         KlipperPanel.Visibility = KlipperOptions.Visibility = IsBambu ? Visibility.Collapsed : Visibility.Visible;
         BambuPanel.Visibility = IsBambu ? Visibility.Visible : Visibility.Collapsed;
+        if (ModulesSummary != null)
+            ShowModules();
         // A U1 lists its touchscreen as a second view, and picks it unless something else is chosen.
         string second = Selected(SecondViewCombo);
         second = IsU1 ? (second.Length == 0 && _touchscreen != false ? Touchscreen : second) : (second == Touchscreen ? "" : second);
@@ -194,13 +205,13 @@ public partial class SettingsWindow : Window
             config.MoonrakerUrl = url;
             config.MoonrakerApiKey = Secret(ApiKeyHidden, ApiKeyVisible);
             config.WebcamConsole = ConsoleCheck.IsChecked == true;
-            config.PrintQueue = QueueCheck.IsChecked == true;
             config.WebcamName = Selected(CameraCombo);
             string second = Selected(SecondViewCombo);
             config.U1Touchscreen = IsU1 && second == Touchscreen;
             config.SecondViewName = second == Touchscreen ? "" : second;
             config.WebcamStream = Selected(CameraStreamCombo);
             config.SecondViewStream = Selected(SecondViewStreamCombo);
+            config.ShowStats = StatsCheck.IsChecked == true;
             if (_tilesChanged)
                 config.StatsTiles = ChosenTiles();
         }
@@ -223,6 +234,9 @@ public partial class SettingsWindow : Window
         }
         config.UpdateIntervalSeconds = int.TryParse(IntervalBox.Text, out int interval) ? Math.Clamp(interval, 1, 60) : 2;
         config.Notifications = NotifyCheck.IsChecked == true;
+        // Ids this version doesn't know (saved by a newer one) are kept.
+        config.Modules = config.Modules.Where(id => ModuleRegistry.All.All(m => m.Id != id))
+            .Concat(_modules).ToList();
         config.CheckForUpdates = UpdateCheck.IsChecked == true;
         return config;
     }
@@ -286,7 +300,7 @@ public partial class SettingsWindow : Window
             FillSources(webcams, Selected(CameraCombo), Selected(SecondViewCombo));
         }
         catch (Exception) { return; }
-        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckPrintQueueAsync(config),
+        await Task.WhenAll(LoadStreamsAsync(CameraView.Main), LoadStreamsAsync(CameraView.Second), CheckModulesAsync(config),
                            LoadSensorsAsync(config), IsU1 ? CheckTouchscreenAsync(config) : Task.CompletedTask);
     }
 
@@ -323,23 +337,43 @@ public partial class SettingsWindow : Window
         for (int i = 0; i < StatusText.MaxStatsTiles; i++)
         {
             string? tile = i < _chosenTiles.Count ? _chosenTiles[i] : null;
+            // A module's tile, with its module off: kept, but not shown in the strip.
+            string? offModule = tile != null && ModuleRegistry.FindTile(tile) is var (module, _) && !_modules.Contains(module.Id)
+                ? module.Name : null;
             var label = new TextBlock
             {
                 Text = tile == null ? "Add" : StatusText.TileLabel(tile),
                 FontSize = 11, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis,
-                Opacity = tile == null ? 0.55 : 1,
+                Opacity = tile == null || offModule != null ? 0.55 : 1,
             };
             var slot = new Button
             {
                 Style = (Style)FindResource("StatsSlot"), Content = label, Tag = i,
                 ToolTip = tile == null ? "Add a tile"
+                    : offModule != null ? $"{TileName(tile)}: not shown while the {offModule} module is off"
                     : StatusText.IsSensorTile(tile) ? $"{TileName(tile)} (Klipper's [{tile}])" : TileName(tile),
             };
             slot.Click += OnStatsSlotClick;
             StatsSlots.Children.Add(slot);
         }
-        StatsHint.Text = "Click a tile to change it. Picking one shown elsewhere swaps the two."
-                         + (_sensors.Count == 0 ? " Test connection lists the printer's other sensors." : "");
+        ShowStatsOnOff();
+    }
+
+    private void OnStatsCheckChanged(object sender, RoutedEventArgs e)
+    {
+        if (StatsSlots != null)
+            ShowStatsOnOff();
+    }
+
+    /// <summary>Off: the picker is greyed out (the tiles stay as chosen, for turning it back on).</summary>
+    private void ShowStatsOnOff()
+    {
+        bool on = StatsCheck.IsChecked == true;
+        StatsSlots.IsEnabled = on;
+        StatsSlots.Opacity = on ? 1 : 0.5;
+        StatsHint.Text = !on ? "Hidden: the webcam popup shows no stats strip."
+                         : "Click a tile to change it. Picking one shown elsewhere swaps the two."
+                           + (_sensors.Count == 0 ? " Test connection lists the printer's other sensors." : "");
     }
 
     /// <summary>A menu of everything a slot can show: temperatures, then the print's progress, then none.</summary>
@@ -367,6 +401,14 @@ public partial class SettingsWindow : Window
         Add(StatusText.Progress);
         Add(StatusText.Layer);
         Add(StatusText.TimeLeft);
+        Add(StatusText.Elapsed);
+        // Tiles from the modules turned on.
+        var moduleTiles = ModuleRegistry.All.Where(m => _modules.Contains(m.Id))
+            .SelectMany(m => m.Tiles.Select(t => ModuleRegistry.TileKey(m, t))).ToList();
+        if (moduleTiles.Count > 0)
+            menu.Items.Add(new Separator());
+        foreach (string tile in moduleTiles)
+            Add(tile);
         if (current != null)
         {
             menu.Items.Add(new Separator());
@@ -396,6 +438,8 @@ public partial class SettingsWindow : Window
         StatusText.Progress => "Progress",
         StatusText.Layer => "Layer",
         StatusText.TimeLeft => "Time left",
+        StatusText.Elapsed => "Time elapsed",
+        _ when ModuleRegistry.FindTile(tile) is var (module, info) => $"{info.Name} ({module.Name})",
         // "beacon_coil" -> "Beacon coil"; names in capitals ("MCU") stay as they are.
         _ => StatusText.SensorName(tile).Replace('_', ' ') is { Length: > 0 } name
              ? char.ToUpperInvariant(name[0]) + name[1..] : tile,
@@ -405,16 +449,51 @@ public partial class SettingsWindow : Window
 
     private List<string> ChosenTiles() => _chosenTiles;
 
-    /// <summary>The queue option only works if the printer's Moonraker has the job queue (it's optional).</summary>
-    private async Task CheckPrintQueueAsync(AppConfig config)
+    // ---- modules ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Why the module can't be used with the printer type picked, or with the printer last reached;
+    /// null if it can. (One that's on stays on, for switching back.)
+    /// </summary>
+    private string? ModuleProblem(IModule module)
     {
-        bool has;
-        try { has = await Task.Run(() => PrinterBackends.HasPrintQueueAsync(config)); }
-        catch (Exception) { return; } // can't tell: leave it as it is
-        QueueCheck.IsEnabled = has;
-        QueueCheck.Content = has
-            ? "Show the print queue in the webcam popup"
-            : "Show the print queue in the webcam popup (this printer has no print queue: add [job_queue] to moonraker.conf)";
+        using var printer = PrinterBackends.Create(new AppConfig { PrinterType = IsBambu ? "bambu" : IsU1 ? "u1" : "klipper" });
+        return !module.Supports(printer) ? $"Not available for {(IsBambu ? "Bambu Lab printers" : "this printer")}."
+               : _moduleProblems.GetValueOrDefault(module);
+    }
+
+    /// <summary>The line saying which modules are on, e.g. "On: Print queue", and the open Modules window.</summary>
+    private void ShowModules()
+    {
+        var on = ModuleRegistry.All.Where(m => _modules.Contains(m.Id))
+            .Select(m => ModuleProblem(m) == null ? m.Name : m.Name + " (not available here)").ToList();
+        ModulesSummary.Text = on.Count == 0 ? "All off" : "On: " + string.Join(", ", on);
+        _modulesWindow?.Refresh();
+    }
+
+    private void OnModulesClick(object sender, RoutedEventArgs e)
+    {
+        _modulesWindow = new ModulesWindow(_modules, ModuleProblem) { Owner = this };
+        try
+        {
+            if (_modulesWindow.ShowDialog() == true && _modulesWindow.Result is { } picked)
+                _modules = picked.ToList();
+        }
+        finally { _modulesWindow = null; }
+        ShowModules();
+        FillStatsPicker(_chosenTiles); // modules' tiles come and go with them
+    }
+
+    /// <summary>Asks the printer whether it has what each module needs (e.g. Moonraker's job queue).</summary>
+    private async Task CheckModulesAsync(AppConfig config)
+    {
+        using var printer = PrinterBackends.Create(config);
+        foreach (var module in ModuleRegistry.All.Where(m => m.Supports(printer)))
+        {
+            try { _moduleProblems[module] = await Task.Run(() => module.CheckAsync(printer, default)); }
+            catch (Exception) { } // can't tell: leave it as it is
+        }
+        ShowModules();
     }
 
     private void OnCameraChanged(object sender, SelectionChangedEventArgs e)

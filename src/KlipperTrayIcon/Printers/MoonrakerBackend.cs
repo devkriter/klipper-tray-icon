@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 namespace KlipperTrayIcon.Printers;
 
 /// <summary>Klipper via Moonraker's HTTP API (what Mainsail and Fluidd talk to).</summary>
-public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
+public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
 {
     private static readonly HttpClient SharedHttp = new(new SocketsHttpHandler
     {
@@ -261,8 +261,11 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
                 // Heaters and temperature fans have a target, shown like the bed's; a plain sensor doesn't.
                 sensors[name] = new Heater(sensor.Num("temperature"), sensor.Num("target"),
                                            Heats: name.StartsWith("heater_generic ") || name.StartsWith("temperature_fan "));
+        // Klipper keeps the finished print's numbers until the next one starts.
+        double? elapsed = state is "printing" or "paused" or "complete" or "cancelled"
+                          && status.Prop("print_stats").Num("total_duration") is > 0 and var t ? t : null;
         return new PrintDetails(ReadHeater(status.Prop(asked)), ReadHeater(status.Prop("heater_bed")), layer, total, z, tool,
-                                sensors, tiles);
+                                sensors, tiles, elapsed);
     }
 
     /// <summary>
@@ -335,124 +338,16 @@ public sealed class MoonrakerBackend : IPrinterBackend, IPrintQueue
         }
     }
 
-    // ---- print queue (Moonraker's job_queue) ------------------------------------
+    // ---- for modules (IMoonrakerApi) ----------------------------------------------
 
-    private readonly Dictionary<string, GcodeDetails> _details = new();
+    public Task<JsonDocument> GetJsonAsync(string pathAndQuery, CancellationToken ct, TimeSpan? timeout = null) =>
+        GetJsonAsync(pathAndQuery, timeout ?? TimeSpan.FromSeconds(5), ct);
 
-    /// <summary>Whether this Moonraker has the job queue (it's an optional component). Throws if unreachable.</summary>
-    public async Task<bool> HasJobQueueAsync(CancellationToken ct)
-    {
-        using var doc = await GetJsonAsync("/server/info", TimeSpan.FromSeconds(3), ct);
-        var components = doc.RootElement.Prop("result").Prop("components");
-        return components.ValueKind == JsonValueKind.Array
-               && components.EnumerateArray().Any(c => c.GetString() == "job_queue");
-    }
-
-    public async Task<QueueStatus> GetQueueAsync(CancellationToken ct)
-    {
-        using var doc = await GetJsonAsync("/server/job_queue/status", TimeSpan.FromSeconds(3), ct);
-        var result = doc.RootElement.Prop("result");
-        var jobs = result.Prop("queued_jobs");
-        return new QueueStatus(result.Str("queue_state", "paused"),
-            jobs.ValueKind != JsonValueKind.Array ? []
-                : jobs.EnumerateArray().Select(j => new QueuedJob(j.Str("job_id"), j.Str("filename"))).ToList());
-    }
-
-    public async Task<IReadOnlyList<GcodeFile>> GetRecentFilesAsync(int count, CancellationToken ct)
-    {
-        using var doc = await GetJsonAsync("/server/files/list?root=gcodes", TimeSpan.FromSeconds(5), ct);
-        var files = doc.RootElement.Prop("result");
-        if (files.ValueKind != JsonValueKind.Array)
-            return [];
-        var recent = files.EnumerateArray()
-            .Select(f => new GcodeFile(f.Str("path"), f.Num("modified")))
-            .Where(f => f.Path.Length > 0)
-            .OrderByDescending(f => f.Modified)
-            .Take(count)
-            .ToList();
-        lock (_details)
-        {
-            foreach (var f in recent)
-            {
-                // Uploaded again under the same name: its details are out of date.
-                if (_detailsModified.TryGetValue(f.Path, out double seen) && seen != f.Modified)
-                    _details.Remove(f.Path);
-                _detailsModified[f.Path] = f.Modified;
-            }
-        }
-        return recent;
-    }
-
-    // When each file's cached details were for (its modified time).
-    private readonly Dictionary<string, double> _detailsModified = new();
-
-    public async Task<GcodeDetails> GetFileDetailsAsync(string path, CancellationToken ct)
-    {
-        lock (_details)
-            if (_details.TryGetValue(path, out var cached))
-                return cached;
-        using var doc = await GetJsonAsync("/server/files/metadata?filename=" + Uri.EscapeDataString(path),
-                                           TimeSpan.FromSeconds(3), ct);
-        var meta = doc.RootElement.Prop("result");
-        // Thumbnails sit next to the file (e.g. ".thumbs/name-48x48.png").
-        string folder = path.Contains('/') ? path[..(path.LastIndexOf('/') + 1)] : "";
-        async Task<byte[]?> Fetch(string? relative) => relative == null ? null
-            : (await FetchImageAsync(BaseUrl + "/server/files/gcodes/" +
-                                     string.Join("/", (folder + relative).Split('/').Select(Uri.EscapeDataString)),
-                                     null, TimeSpan.FromSeconds(3), ct)).Image;
-        string? small = PickThumbnail(meta), big = PickPreview(meta);
-        byte[]? thumbnail = await Fetch(small);
-        byte[]? preview = big == small ? thumbnail : await Fetch(big);
-        var details = new GcodeDetails(meta.Num("estimated_time") is > 0 and var t ? t : null, thumbnail, preview);
-        lock (_details)
-            _details[path] = details;
-        return details;
-    }
-
-    /// <summary>The smallest thumbnail at least 48 px wide (the list shows them at 40), else the biggest.</summary>
-    internal static string? PickThumbnail(JsonElement meta)
-    {
-        var thumbs = meta.Prop("thumbnails");
-        if (thumbs.ValueKind != JsonValueKind.Array)
-            return null;
-        var all = thumbs.EnumerateArray()
-            .Select(t => (Width: t.Num("width"), Path: t.Str("relative_path")))
-            .Where(t => t.Path.Length > 0)
-            .ToList();
-        var fitting = all.Where(t => t.Width >= 48).OrderBy(t => t.Width).ToList();
-        return fitting.Count > 0 ? fitting[0].Path : all.OrderByDescending(t => t.Width).Select(t => t.Path).FirstOrDefault();
-    }
-
-    /// <summary>The biggest thumbnail, shown when hovering over the small one.</summary>
-    internal static string? PickPreview(JsonElement meta)
-    {
-        var thumbs = meta.Prop("thumbnails");
-        return thumbs.ValueKind != JsonValueKind.Array ? null
-            : thumbs.EnumerateArray()
-                .Select(t => (Width: t.Num("width"), Path: t.Str("relative_path")))
-                .Where(t => t.Path.Length > 0)
-                .OrderByDescending(t => t.Width)
-                .Select(t => t.Path)
-                .FirstOrDefault();
-    }
-
-    public Task AddToQueueAsync(string path, CancellationToken ct) =>
-        SendAsync(HttpMethod.Post, "/server/job_queue/job", new { filenames = new[] { path } }, ct);
-
-    public Task RemoveFromQueueAsync(string jobId, CancellationToken ct) =>
-        SendAsync(HttpMethod.Delete, "/server/job_queue/job?job_ids=" + Uri.EscapeDataString(jobId), null, ct);
-
-    public Task ReorderQueueAsync(IReadOnlyList<string> paths, CancellationToken ct) =>
-        SendAsync(HttpMethod.Post, "/server/job_queue/job", new { filenames = paths, reset = true }, ct);
-
-    public Task StartQueueAsync(CancellationToken ct) =>
-        SendAsync(HttpMethod.Post, "/server/job_queue/start", null, ct);
-
-    public Task StartPrintAsync(string path, CancellationToken ct) =>
-        SendAsync(HttpMethod.Post, "/printer/print/start?filename=" + Uri.EscapeDataString(path), null, ct);
+    public async Task<byte[]?> GetImageAsync(string pathAndQuery, CancellationToken ct, TimeSpan? timeout = null) =>
+        (await FetchImageAsync(BaseUrl + pathAndQuery, null, timeout ?? TimeSpan.FromSeconds(5), ct)).Image;
 
     /// <summary>A request that changes something on the printer. Throws unless it succeeds.</summary>
-    private async Task SendAsync(HttpMethod method, string pathAndQuery, object? json, CancellationToken ct)
+    public async Task SendAsync(HttpMethod method, string pathAndQuery, object? json, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(5));

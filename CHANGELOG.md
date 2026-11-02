@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.12.0] - 2026-11-02
+### Added
+- Stats strip: a *Time elapsed* tile to pick in Settings, showing how long the print has been
+  running (preparing and pauses included) and since when, or its total once it's done.
+- Stats strip: a checkbox in Settings hides it (the tiles stay as chosen, for turning it back on).
+- Modules can add tiles to the stats strip, picked in Settings like the built-in ones while the
+  module is on. The print queue's *QUEUE* tile shows how many jobs are queued and which is next.
+
+### Changed
+- Modules: optional features are now modules, all off until turned on in Settings under *Manage
+  modules…*: a window listing them, each with its on/off, and on the right the picked one's details
+  (what it does, what the printer needs, or why it can't be used with this printer). Each
+  one gets a button in the popup's title bar beside a new console button, side by side, replacing
+  the old console/queue toggle; with only the console, the title bar is as before. The print queue
+  is the first module; if it was on, it stays on.
+- CONTRIBUTING.md explains how to add a module: a folder under `Modules/` and one line to register
+  it, without touching the rest of the app.
+
 ## [2.11.0] - 2026-11-01
 ### Added
 - Updates: once a day (20 seconds after start, then daily) the app asks GitHub for the latest

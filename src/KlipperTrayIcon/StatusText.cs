@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using KlipperTrayIcon.Modules;
 using KlipperTrayIcon.Printers;
 
 namespace KlipperTrayIcon;
@@ -60,6 +61,13 @@ public static partial class StatusText
         return lines;
     }
 
+    /// <summary>"Benchy" for "parts/Benchy.gcode".</summary>
+    public static string DisplayName(string path)
+    {
+        string name = path[(path.LastIndexOf('/') + 1)..];
+        return name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ? name[..^".gcode".Length] : name;
+    }
+
     public static string FormatDuration(double seconds)
     {
         if (seconds < 0) return "?";
@@ -74,7 +82,8 @@ public static partial class StatusText
     // ---- stats strip ---------------------------------------------------------------
 
     public const int MaxStatsTiles = 6;
-    public const string Nozzle = "nozzle", Bed = "bed", Progress = "progress", Layer = "layer", TimeLeft = "time_left";
+    public const string Nozzle = "nozzle", Bed = "bed", Progress = "progress", Layer = "layer", TimeLeft = "time_left",
+                        Elapsed = "elapsed";
 
     /// <summary>Nozzle, bed, the chamber if the printer has a sensor for it, then progress, layer and time left.</summary>
     public static IReadOnlyList<string> DefaultTiles(string? chamber) =>
@@ -83,6 +92,9 @@ public static partial class StatusText
     /// <summary>A Klipper sensor ("temperature_fan chamber"), as opposed to a built-in tile; nozzles and the bed have their own.</summary>
     public static bool IsSensorTile(string tile) =>
         tile.Contains(' ') && !tile.StartsWith("extruder") && tile != "heater_bed";
+
+    /// <summary>A module's tile, "print_queue:queue" (see ModuleRegistry.TileKey); the popup fills it in.</summary>
+    public static bool IsModuleTile(string tile) => tile.Contains(':') && !tile.Contains(' ');
 
     /// <summary>"chamber" for "temperature_fan chamber".</summary>
     public static string SensorName(string tile) => tile[(tile.IndexOf(' ') + 1)..];
@@ -95,6 +107,8 @@ public static partial class StatusText
         Progress => "PROGRESS",
         Layer => "LAYER",
         TimeLeft => "TIME LEFT",
+        Elapsed => "ELAPSED",
+        _ when IsModuleTile(tile) => ModuleRegistry.FindTile(tile)?.Tile.Label ?? tile.ToUpperInvariant(),
         _ => SensorName(tile).Replace('_', ' ').ToUpperInvariant(),
     };
 
@@ -148,6 +162,15 @@ public static partial class StatusText
         else if (s.State == "paused")
             time = new(none, "paused");
 
+        Tile elapsed = new(none, "");
+        if (d?.Elapsed is double seconds)
+        {
+            var clock = now ?? DateTime.Now;
+            var start = clock.AddSeconds(-seconds);
+            elapsed = new(FormatDuration(seconds), !active ? "in total"
+                          : start.Date == clock.Date ? $"since {start:HH:mm}" : $"since {start:ddd HH:mm}");
+        }
+
         return tiles.Select(t => t switch
         {
             Nozzle => Heater(d?.Nozzle),
@@ -155,6 +178,7 @@ public static partial class StatusText
             Progress => progress,
             Layer => layer,
             TimeLeft => time,
+            Elapsed => elapsed,
             _ => Heater(d?.Sensors?.GetValueOrDefault(t)),
         }).ToArray();
     }

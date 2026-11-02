@@ -42,6 +42,20 @@ public class StatusTextTests
     }
 
     [Fact]
+    public void ElapsedTile()
+    {
+        var now = new DateTime(2026, 1, 2, 1, 30, 0);
+        string[] tiles = [StatusText.Elapsed];
+        PrinterStatus Status(string state, double? elapsed) =>
+            new(state, 0.5, Details: new PrintDetails(null, null, Elapsed: elapsed));
+        Assert.Equal(new StatusText.Tile("1h 0m", "since 00:30"), StatusText.StatsTiles(Status("printing", 3600), now, tiles)[0]);
+        Assert.Equal(new StatusText.Tile("2h 0m", "since Thu 23:30"), StatusText.StatsTiles(Status("paused", 7200), now, tiles)[0]);
+        Assert.Equal(new StatusText.Tile("2h 5m", "in total"), StatusText.StatsTiles(Status("complete", 7500), now, tiles)[0]);
+        Assert.Equal(new StatusText.Tile("—", ""), StatusText.StatsTiles(Status("standby", null), now, tiles)[0]);
+        Assert.Equal(["ELAPSED"], StatusText.StatsLabels(Status("printing", 1), tiles));
+    }
+
+    [Fact]
     public void ChamberTileOnlyWithAChamberSensor()
     {
         var details = new PrintDetails(new Heater(215, 215), new Heater(60, 60));
@@ -212,6 +226,7 @@ public class MoonrakerTests
         Assert.Equal("printing", status.State);
         Assert.True(status.Preparing);
         Assert.Equal("Preparing to print", StatusText.Lines(status)[0]);
+        Assert.Equal(240, status.Details?.Elapsed); // elapsed counts the preparing too
     }
 
     [Fact]

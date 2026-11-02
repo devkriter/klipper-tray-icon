@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
+using KlipperTrayIcon.Modules;
 using KlipperTrayIcon.Printers;
 using KlipperTrayIcon.UI;
 using Forms = System.Windows.Forms;
@@ -201,7 +202,8 @@ public sealed class TrayController : IDisposable
     private void CreatePopup()
     {
         _popup = _backend.SupportsWebcam
-            ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole, _config.PrintQueue)
+            ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole,
+                              ModuleRegistry.Enabled(_config, _backend), _config.ShowStats)
             : null;
         if (_popup is { HasStats: true } popup)
             popup.IsVisibleChanged += (_, _) =>

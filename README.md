@@ -21,16 +21,22 @@ The icon updates dynamically to show a circular progress bar corresponding to th
 - **Snapmaker U1 touchscreen** (the *U1 Extended* type): see and use the printer's screen right in
   the popup, once you unlock touch with the lock button (it starts locked, so a stray click can't
   press anything). See [Snapmaker U1 Support](#snapmaker-u1-support).
-- **Print queue** (Klipper, optional): a button in the popup's title bar swaps the console for
-  the printer's print queue (Moonraker's job queue, as in Mainsail): thumbnails (hover one for a
-  larger preview), drag to reorder, ✕ to remove. Below it are the recent uploads not queued yet
-  (*Load more* for older ones): ＋ adds one at the end, or drag it into the queue where you want it.
-  ▶ on any row prints that file now. It and *Start next* ask for a second click. Off by default; turn it on in Settings.
+- **Modules**: optional extras, all off until you turn them on in Settings under *Manage modules…*,
+  which lists them with what each one does and needs. Each
+  one gets a button in the popup's title bar, side by side with the console's, to switch the side
+  panel to it. Want to add one? See [CONTRIBUTING.md](CONTRIBUTING.md).
+  - **Print queue** (Klipper): the printer's print queue (Moonraker's job queue, as in Mainsail):
+    thumbnails (hover one for a larger preview), drag to reorder, ✕ to remove. Below it are the
+    recent uploads not queued yet (*Load more* for older ones): ＋ adds one at the end, or drag it
+    into the queue where you want it. ▶ on any row prints that file now. It and *Start next* ask
+    for a second click. Its *QUEUE* tile for the stats strip shows how many jobs are queued and
+    which is next.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
-  including any of the printer's other temperature sensors. If Klipper shuts down, the console says
-  why, with *Click to restart* under it. The console can be turned off in Settings.
+  including time elapsed, any of the printer's other temperature sensors, and tiles from modules
+  that are on. The strip and the console can each be turned off in Settings. If Klipper shuts
+  down, the console says why, with *Click to restart* under it.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Quiet updates**: once a day the app checks GitHub for a new release. Nothing pops up: an
   *Update to vX* item appears in the tray menu (and *Update now* in Settings), and one click
@@ -173,7 +179,8 @@ For Klipper/Moonraker (see `config.example.json`):
     "moonraker_url": "http://your-printer-ip",
     "moonraker_api_key": "",
     "webcam_console": true,
-    "print_queue": false,
+    "modules": [],
+    "show_stats": true,
     "stats_tiles": null,
     "webcam_name": "",
     "webcam_stream": "",
@@ -196,6 +203,11 @@ For Bambu Lab (see `config.example.bambu.json`):
     "notifications": true
 }
 ```
+
+`modules` lists the modules turned on, e.g. `["print_queue"]`.
+
+`show_stats` shows the stats strip; `stats_tiles` lists its tiles, e.g. `["nozzle", "bed", "progress",
+"elapsed", "print_queue:queue", "time_left"]` (null: the default).
 
 `webcam_name` picks which of Moonraker's webcams to show (empty: the first one), and
 `second_view_name` adds a second one the popup can switch to — both are easiest to set from the

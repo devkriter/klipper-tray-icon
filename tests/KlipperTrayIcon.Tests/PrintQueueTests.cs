@@ -2,8 +2,8 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using KlipperTrayIcon.Modules.PrintQueue;
 using KlipperTrayIcon.Printers;
-using KlipperTrayIcon.UI;
 using Xunit;
 
 namespace KlipperTrayIcon.Tests;
@@ -55,10 +55,16 @@ public class PrintQueueTests
         }
     }
 
-    private static (MoonrakerBackend Backend, FakeMoonraker Printer) Make()
+    private static (MoonrakerBackend Backend, FakeMoonraker Printer) MakePrinter()
     {
         var printer = new FakeMoonraker();
         return (new MoonrakerBackend("p", http: new HttpClient(printer)), printer);
+    }
+
+    private static (PrintQueueApi Queue, FakeMoonraker Printer) Make()
+    {
+        var (backend, printer) = MakePrinter();
+        return (new PrintQueueApi(backend), printer);
     }
 
     [Fact]
@@ -138,7 +144,7 @@ public class PrintQueueTests
     [Fact]
     public async Task RestartIsAFirmwareRestart()
     {
-        var (backend, printer) = Make();
+        var (backend, printer) = MakePrinter();
         await backend.RestartKlipperAsync(default);
         Assert.Equal(["POST /printer/firmware_restart"], printer.Requests);
     }
@@ -146,8 +152,8 @@ public class PrintQueueTests
     [Fact]
     public async Task FailedChangesThrow()
     {
-        var backend = new MoonrakerBackend("p", http: new HttpClient(new Refusing()));
-        await Assert.ThrowsAsync<MoonrakerHttpException>(() => backend.StartQueueAsync(default));
+        var queue = new PrintQueueApi(new MoonrakerBackend("p", http: new HttpClient(new Refusing())));
+        await Assert.ThrowsAsync<MoonrakerHttpException>(() => queue.StartQueueAsync(default));
     }
 
     private sealed class Refusing : HttpMessageHandler
@@ -163,7 +169,7 @@ public class PrintQueueTests
     public void PicksASmallThumbnail(string meta, string? expected)
     {
         using var doc = JsonDocument.Parse(meta);
-        Assert.Equal(expected, MoonrakerBackend.PickThumbnail(doc.RootElement));
+        Assert.Equal(expected, PrintQueueApi.PickThumbnail(doc.RootElement));
     }
 
     [Theory]
@@ -173,7 +179,7 @@ public class PrintQueueTests
     public void PreviewIsTheBiggestThumbnail(string meta, string? expected)
     {
         using var doc = JsonDocument.Parse(meta);
-        Assert.Equal(expected, MoonrakerBackend.PickPreview(doc.RootElement));
+        Assert.Equal(expected, PrintQueueApi.PickPreview(doc.RootElement));
     }
 
     [Fact]
@@ -181,9 +187,9 @@ public class PrintQueueTests
     {
         var recent = new[] { "A.gcode", "B.gcode", "C.gcode", "D.gcode" }.Select((p, i) => new GcodeFile(p, 100 - i)).ToList();
         var status = new QueueStatus("paused", [new QueuedJob("1", "B.gcode")]);
-        Assert.Equal(["A.gcode", "C.gcode"], WebcamPopup.RecentToShow(recent, status, 2).Select(f => f.Path));
+        Assert.Equal(["A.gcode", "C.gcode"], PrintQueuePanel.RecentToShow(recent, status, 2).Select(f => f.Path));
         // Off the queue again, it's back.
-        Assert.Equal(["A.gcode", "B.gcode"], WebcamPopup.RecentToShow(recent, new QueueStatus("paused", []), 2).Select(f => f.Path));
+        Assert.Equal(["A.gcode", "B.gcode"], PrintQueuePanel.RecentToShow(recent, new QueueStatus("paused", []), 2).Select(f => f.Path));
     }
 
     [Theory]
@@ -204,7 +210,7 @@ public class PrintQueueTests
                 resets++;
             touched++;
         };
-        WebcamPopup.Replace(rows, after);
+        PrintQueuePanel.Replace(rows, after);
         Assert.Equal(after, string.Concat(rows));
         Assert.Equal(0, resets); // never rebuilt as a whole
         Assert.True(touched <= Math.Max(before.Length, after.Length));
@@ -215,7 +221,7 @@ public class PrintQueueTests
     {
         var rows = new System.Collections.ObjectModel.ObservableCollection<char>("ABC");
         rows.CollectionChanged += (_, _) => Assert.Fail("changed");
-        WebcamPopup.Replace(rows, "ABC");
+        PrintQueuePanel.Replace(rows, "ABC");
     }
 
     [Theory]
@@ -223,7 +229,7 @@ public class PrintQueueTests
     [InlineData("parts/Clip_x4.GCODE", "Clip_x4")]
     [InlineData("notes.txt", "notes.txt")]
     public void ShowsFileNamesWithoutFolderOrExtension(string path, string name) =>
-        Assert.Equal(name, WebcamPopup.DisplayName(path));
+        Assert.Equal(name, StatusText.DisplayName(path));
 
     [Theory]
     [InlineData(20, "just now")]
@@ -234,6 +240,6 @@ public class PrintQueueTests
     public void SaysHowLongAgo(int seconds, string text)
     {
         var now = new DateTimeOffset(2026, 10, 31, 12, 0, 0, TimeSpan.Zero);
-        Assert.Equal(text, WebcamPopup.Ago(now.AddSeconds(-seconds), now));
+        Assert.Equal(text, PrintQueuePanel.Ago(now.AddSeconds(-seconds), now));
     }
 }

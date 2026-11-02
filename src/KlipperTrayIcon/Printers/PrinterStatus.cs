@@ -38,7 +38,8 @@ public sealed record PrintDetails(
     double Z = 0,
     string? Tool = null, // "T2" on printers with several extruders
     IReadOnlyDictionary<string, Heater>? Sensors = null, // other sensors shown, by Klipper name ("temperature_fan chamber")
-    IReadOnlyList<string>? Tiles = null); // the stats strip's tiles (see StatusText.StatsTiles)
+    IReadOnlyList<string>? Tiles = null, // the stats strip's tiles (see StatusText.StatsTiles)
+    double? Elapsed = null); // seconds since the print started, preparing and pauses included
 
 /// <summary>Target 0 means the heater is off. Heats is false for a plain sensor, which has no target.</summary>
 public sealed record Heater(double Temperature, double Target, bool Heats = true);

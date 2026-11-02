@@ -95,12 +95,18 @@ public partial class App : Application
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         // Keep the tray icon alive; note the problem next to the exe.
+        LogError("Unhandled", e.Exception);
+        e.Handled = true;
+    }
+
+    /// <summary>Notes a problem in error.log next to the exe.</summary>
+    public static void LogError(string what, Exception e)
+    {
         try
         {
             File.AppendAllText(Path.Combine(ConfigStore.AppDir, "error.log"),
-                               $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {e.Exception}\n\n");
+                               $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {what}: {e}\n\n");
         }
         catch (Exception) { }
-        e.Handled = true;
     }
 }

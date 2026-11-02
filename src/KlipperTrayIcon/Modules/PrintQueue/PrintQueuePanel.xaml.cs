@@ -11,8 +11,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using KlipperTrayIcon.Printers;
+using KlipperTrayIcon.UI;
 
-namespace KlipperTrayIcon.UI;
+namespace KlipperTrayIcon.Modules.PrintQueue;
 
 /// <summary>One file in the queue panel: a queued job, or a recent upload.</summary>
 public sealed record QueueRow(string Path, string Name, string Detail, ImageSource? Thumbnail, ImageSource? Preview,
@@ -24,14 +25,15 @@ public sealed record QueueRow(string Path, string Name, string Detail, ImageSour
 /// uploads that aren't queued (＋ to add, "Load more" for older ones) and a
 /// start button that needs a second click to confirm.
 /// </summary>
-public partial class WebcamPopup
+public partial class PrintQueuePanel : ModulePanel
 {
     private const int RecentCount = 5; // recent uploads shown at first, and added by each "Load more"
     private static readonly TimeSpan QueueRefresh = TimeSpan.FromSeconds(2), FilesRefresh = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StartConfirmTime = TimeSpan.FromSeconds(4);
 
-    private IPrintQueue? _queue;
-    private bool _queueShown; // the panel shows the queue rather than the console
+    private readonly PrintQueueApi _queue;
+    private readonly IPrinterBackend _printer;
+    private readonly CancellationToken _lifetime;
     private volatile bool _queueWake = true;
     private volatile int _recentCount = RecentCount;
     private readonly ObservableCollection<QueueRow> _queueRows = new();
@@ -55,31 +57,37 @@ public partial class WebcamPopup
     private bool _dragFromQueue;
     private int _dropIndex = -1; // where it lands in the queue; -1 when it's not over the queue
 
-    private void SetUpQueue(IPrintQueue queue, bool consoleToo)
+    public PrintQueuePanel(PrintQueueApi queue, ModuleContext context)
     {
-        Resources["GrabCursor"] = HandCursors.Open;
+        InitializeComponent();
         _queue = queue;
+        _printer = context.Printer;
+        _lifetime = context.Lifetime;
+        Resources["GrabCursor"] = HandCursors.Open;
         QueueList.ItemsSource = _queueRows;
         RecentList.ItemsSource = _recentRows;
         _disarm.Tick += (_, _) => { _startArmed = false; _disarm.Stop(); ArmPlay(null); UpdateStartButton(); };
-        // Without the console, the panel is just the queue.
-        QueueButton.Visibility = consoleToo ? Visibility.Visible : Visibility.Collapsed;
-        ShowQueuePanel(!consoleToo);
         UpdateStartButton();
-        _ = Task.Run(() => QueueLoopAsync(_lifetime.Token));
+        _ = Task.Run(() => QueueLoopAsync(_lifetime));
     }
 
-    private void OnQueueButtonClick(object sender, RoutedEventArgs e) => ShowQueuePanel(!_queueShown);
-
-    private void ShowQueuePanel(bool queue)
+    public override void OnPopupShown()
     {
-        _queueShown = queue;
-        QueueView.Visibility = queue ? Visibility.Visible : Visibility.Collapsed;
-        ConsoleView.Visibility = queue ? Visibility.Collapsed : Visibility.Visible;
-        QueueButton.Content = queue ? "" : ""; // console / list
-        QueueButton.ToolTip = queue ? "Show the console" : "Show the print queue";
-        if (queue)
+        _queueWake = true; // fresh queue on opening, not up to a refresh later
+        _recentCount = RecentCount; // and back to the few newest uploads
+    }
+
+    public override void OnSelected(bool selected)
+    {
+        if (selected)
             _queueWake = true;
+    }
+
+    /// <summary>The printer's state from the tray's status updates (for the start button).</summary>
+    public override void OnStatus(PrinterStatus status)
+    {
+        _printerState = status.State;
+        UpdateStartButton();
     }
 
     // ---- refreshing ------------------------------------------------------------------
@@ -92,7 +100,7 @@ public partial class WebcamPopup
         bool filesKnown = false;
         while (!ct.IsCancellationRequested)
         {
-            var (showing, edits) = await Dispatcher.InvokeAsync(() => (IsVisible && _queueShown, _queueEdits));
+            var (showing, edits) = await Dispatcher.InvokeAsync(() => (IsVisible, _queueEdits));
             if (!_queueWake && !(showing && sinceQueue.Elapsed >= QueueRefresh))
             {
                 try { await Task.Delay(200, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
@@ -103,7 +111,7 @@ public partial class WebcamPopup
             sinceQueue.Restart();
             try
             {
-                var status = await _queue!.GetQueueAsync(ct).ConfigureAwait(false);
+                var status = await _queue.GetQueueAsync(ct).ConfigureAwait(false);
                 if (woken || !filesKnown || sinceFiles.Elapsed >= FilesRefresh)
                 {
                     // Queued files are left out of the list, so ask for enough to fill it anyway, and one
@@ -127,7 +135,7 @@ public partial class WebcamPopup
             catch (OperationCanceledException) { break; }
             catch (Exception e)
             {
-                string message = _backend.DescribeError(e);
+                string message = _printer.DescribeError(e);
                 await Dispatcher.InvokeAsync(() => QueueStateText.Text = message);
             }
         }
@@ -150,7 +158,7 @@ public partial class WebcamPopup
     private QueueRow QueueRowFor(string path, string jobId)
     {
         var d = _details.GetValueOrDefault(path);
-        return new QueueRow(path, DisplayName(path), d?.EstimatedSeconds is double t ? StatusText.FormatDuration(t) : "",
+        return new QueueRow(path, StatusText.DisplayName(path), d?.EstimatedSeconds is double t ? StatusText.FormatDuration(t) : "",
                             Image(path, d?.Thumbnail), Image(path + "#preview", d?.Preview), jobId);
     }
 
@@ -164,7 +172,7 @@ public partial class WebcamPopup
             var d = _details.GetValueOrDefault(f.Path);
             string age = Ago(DateTimeOffset.FromUnixTimeMilliseconds((long)(f.Modified * 1000)));
             string detail = d?.EstimatedSeconds is double t ? $"{StatusText.FormatDuration(t)} · {age}" : age;
-            return new QueueRow(f.Path, DisplayName(f.Path), detail, Image(f.Path, d?.Thumbnail), Image(f.Path + "#preview", d?.Preview));
+            return new QueueRow(f.Path, StatusText.DisplayName(f.Path), detail, Image(f.Path, d?.Thumbnail), Image(f.Path + "#preview", d?.Preview));
         }));
         LoadMoreButton.Visibility = _recentFiles.Count(f => !queued.Contains(f.Path)) > shown.Count ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -221,17 +229,10 @@ public partial class WebcamPopup
             return null;
         if (_thumbnails.TryGetValue(key, out var cached) && cached.Bytes == bytes)
             return cached.Image;
-        if (TryDecode(bytes) is not { } image)
+        if (WebcamPopup.TryDecode(bytes) is not { } image)
             return null;
         _thumbnails[key] = (bytes, image);
         return image;
-    }
-
-    /// <summary>"Benchy" for "parts/Benchy.gcode".</summary>
-    internal static string DisplayName(string path)
-    {
-        string name = path[(path.LastIndexOf('/') + 1)..];
-        return name.EndsWith(".gcode", StringComparison.OrdinalIgnoreCase) ? name[..^".gcode".Length] : name;
     }
 
     internal static string Ago(DateTimeOffset time, DateTimeOffset? now = null)
@@ -246,21 +247,12 @@ public partial class WebcamPopup
 
     // ---- start next -------------------------------------------------------------------
 
-    /// <summary>The printer's state from the tray's status updates (for the start button).</summary>
-    private void QueueSawStatus(PrinterStatus status)
-    {
-        _printerState = status.State;
-        UpdateStartButton();
-    }
-
     /// <summary>
     /// The header's right side: the start button when the next job can start,
     /// otherwise a short note on why not (or what will happen).
     /// </summary>
     private void UpdateStartButton()
     {
-        if (_queue == null)
-            return;
         var jobs = _queueStatus?.Jobs ?? [];
         bool busy = _printerState is "printing" or "paused";
         // The rows' ▶: enabled whenever a print could start (not just with something queued), greyed out
@@ -299,7 +291,7 @@ public partial class WebcamPopup
             text.Inlines.Add(new System.Windows.Documents.Run("Start next"));
         }
         StartNextButton.Content = text;
-        StartNextButton.ToolTip = $"Starts {DisplayName(jobs[0].Path)}";
+        StartNextButton.ToolTip = $"Starts {StatusText.DisplayName(jobs[0].Path)}";
         // Armed: amber, so the second click is clearly a different, deliberate one.
         StartNextButton.Background = _startArmed ? ConsoleLine.TemperatureBrush : StartIdle;
         StartNextButton.Foreground = _startArmed ? Brushes.Black : StartText;
@@ -310,6 +302,13 @@ public partial class WebcamPopup
                                   StartIdle = Frozen(Color.FromRgb(0x26, 0x26, 0x26)),
                                   StartBorder = Frozen(Color.FromRgb(0x3A, 0x3A, 0x3A)),
                                   StartText = Frozen(Color.FromRgb(0xDA, 0xDA, 0xDA));
+
+    private static Brush Frozen(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
     // The last change that failed, shown in the header for a few seconds.
     private string? _actionError;
 
@@ -330,7 +329,7 @@ public partial class WebcamPopup
         StartNextButton.Visibility = Visibility.Collapsed;
         QueueStateText.Text = "Starting…";
         QueueStateText.Visibility = Visibility.Visible;
-        await QueueActionAsync(q => q.StartQueueAsync(_lifetime.Token), "Couldn't start");
+        await QueueActionAsync(q => q.StartQueueAsync(_lifetime), "Couldn't start");
     }
 
     // ---- print now (a row's ▶) --------------------------------------------------------
@@ -365,9 +364,9 @@ public partial class WebcamPopup
         UpdateStartButton();
         await QueueActionAsync(async q =>
         {
-            await q.StartPrintAsync(row.Path, _lifetime.Token);
+            await q.StartPrintAsync(row.Path, _lifetime);
             if (queued && row.JobId != "")
-                await q.RemoveFromQueueAsync(row.JobId, _lifetime.Token);
+                await q.RemoveFromQueueAsync(row.JobId, _lifetime);
         }, "Couldn't start it");
     }
 
@@ -399,7 +398,7 @@ public partial class WebcamPopup
             _queueRows.Add(QueueRowFor(row.Path, ""));
             ShowRecent();
             ShowQueueCount();
-            await QueueActionAsync(q => q.AddToQueueAsync(row.Path, _lifetime.Token), "Couldn't add it");
+            await QueueActionAsync(q => q.AddToQueueAsync(row.Path, _lifetime), "Couldn't add it");
         }
     }
 
@@ -410,7 +409,7 @@ public partial class WebcamPopup
             _queueRows.Remove(row); // at once (back among the uploads); the next refresh confirms it
             ShowRecent();
             ShowQueueCount();
-            await QueueActionAsync(q => q.RemoveFromQueueAsync(row.JobId, _lifetime.Token), "Couldn't remove it");
+            await QueueActionAsync(q => q.RemoveFromQueueAsync(row.JobId, _lifetime), "Couldn't remove it");
         }
     }
 
@@ -569,7 +568,7 @@ public partial class WebcamPopup
         {
             _queueRows.Move(_queueRows.IndexOf(row), to);
             var order = _queueRows.Select(r => r.Path).ToList();
-            await QueueActionAsync(q => q.ReorderQueueAsync(order, _lifetime.Token), "Couldn't reorder");
+            await QueueActionAsync(q => q.ReorderQueueAsync(order, _lifetime), "Couldn't reorder");
         }
         else
         {
@@ -581,9 +580,9 @@ public partial class WebcamPopup
             var order = _queueRows.Select(r => r.Path).ToList();
             await QueueActionAsync(async q =>
             {
-                await q.AddToQueueAsync(row.Path, _lifetime.Token);
+                await q.AddToQueueAsync(row.Path, _lifetime);
                 if (!last)
-                    await q.ReorderQueueAsync(order, _lifetime.Token);
+                    await q.ReorderQueueAsync(order, _lifetime);
             }, "Couldn't add it");
         }
     }
@@ -592,12 +591,12 @@ public partial class WebcamPopup
     /// Runs a change on the printer, then refreshes (which also puts things back if it failed);
     /// a failure shows in the header.
     /// </summary>
-    private async Task QueueActionAsync(Func<IPrintQueue, Task> action, string failure)
+    private async Task QueueActionAsync(Func<PrintQueueApi, Task> action, string failure)
     {
         Exception? error = null;
         _queueEdits++;
         _queueBusy++;
-        try { await Task.Run(() => action(_queue!)); }
+        try { await Task.Run(() => action(_queue)); }
         catch (Exception e) when (!_lifetime.IsCancellationRequested) { error = e; }
         finally
         {
@@ -608,7 +607,7 @@ public partial class WebcamPopup
         if (error != null)
         {
             // In the header for a few seconds, then the usual button or note again.
-            _actionError = $"{failure}: {_backend.DescribeError(error)}";
+            _actionError = $"{failure}: {_printer.DescribeError(error)}";
             UpdateStartButton();
             await Task.Delay(TimeSpan.FromSeconds(5));
             _actionError = null;

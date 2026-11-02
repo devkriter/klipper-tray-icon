@@ -1,0 +1,133 @@
+<Window x:Class="KlipperTrayIcon.UI.ModulesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Modules"
+        Width="700" Height="460" MinWidth="560" MinHeight="360"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <FontFamily x:Key="Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Opacity" Value="0.65" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style x:Key="Heading" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.65" />
+            <Setter Property="Margin" Value="0,18,0,4" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20,18,20,18">
+        <Grid.RowDefinitions>
+            <RowDefinition />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="230" />
+            <ColumnDefinition />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left: every module, with its on/off. -->
+        <ListBox x:Name="ModuleList" SelectionChanged="OnPicked" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="AutomationProperties.Name" Value="{Binding Module.Name}" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="Icon" Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="16"
+                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <StackPanel x:Name="Words" Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Module.Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding State}" FontSize="11" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <CheckBox Grid.Column="2" IsChecked="{Binding IsOn}" IsEnabled="{Binding Available}"
+                                  MinWidth="0" Margin="8,0,-6,0" VerticalAlignment="Center"
+                                  AutomationProperties.Name="{Binding Module.Name}" ToolTip="Turn on or off" />
+                    </Grid>
+                    <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding Available}" Value="False">
+                            <Setter TargetName="Icon" Property="Opacity" Value="0.5" />
+                            <Setter TargetName="Words" Property="Opacity" Value="0.5" />
+                        </DataTrigger>
+                    </DataTemplate.Triggers>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Right: the picked module's details. -->
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="24,0,0,0">
+            <StackPanel x:Name="Details" Margin="0,0,8,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="22"
+                               VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding Module.Name}" FontSize="20" FontWeight="SemiBold"
+                               TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <CheckBox x:Name="OnCheck" Grid.Column="2" Content="On" IsChecked="{Binding IsOn}" IsEnabled="{Binding Available}"
+                              VerticalAlignment="Center" Margin="12,0,0,0" />
+                </Grid>
+                <TextBlock Text="{Binding Module.Description}" TextWrapping="Wrap" Margin="0,10,0,0" />
+
+                <!-- Why it can't be used here. -->
+                <Border x:Name="ProblemBox" CornerRadius="4" Padding="10,8" Margin="0,12,0,0"
+                        Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="&#xE7BA;" FontFamily="{StaticResource Icons}" FontSize="14" Margin="0,1,10,0"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Problem}" TextWrapping="Wrap" />
+                    </Grid>
+                </Border>
+
+                <TextBlock x:Name="DetailsText" Text="{Binding Module.Details}" TextWrapping="Wrap" Margin="0,14,0,0" />
+
+                <StackPanel x:Name="NeedsPanel">
+                    <TextBlock Text="NEEDS" Style="{StaticResource Heading}" />
+                    <TextBlock Text="{Binding Module.Needs}" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel x:Name="AboutPanel">
+                    <TextBlock Text="ABOUT" Style="{StaticResource Heading}" />
+                    <TextBlock x:Name="AuthorText" TextWrapping="Wrap" />
+                    <TextBlock x:Name="HelpLink" Margin="0,4,0,0">
+                        <Hyperlink Click="OnHelpClick" ToolTip="{Binding Module.HelpUrl}"><Run Text="Learn more" /></Hyperlink>
+                    </TextBlock>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer -->
+        <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="0,0,16,0"
+                       Text="Modules are off until you turn them on. Each one gets a button in the webcam popup's title bar, beside the console's. Saved with Settings." />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="DoneButton" Content="Done" MinWidth="96" IsDefault="True" Click="OnDoneClick"
+                        Style="{DynamicResource AccentButtonStyle}" />
+                <Button Content="Cancel" MinWidth="96" Margin="8,0,0,0" IsCancel="True" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

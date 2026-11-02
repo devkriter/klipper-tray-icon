@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -10,6 +11,8 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using KlipperTrayIcon.Modules;
 using KlipperTrayIcon.Printers;
 using TouchAction = KlipperTrayIcon.Printers.TouchAction;
 
@@ -34,8 +37,10 @@ public partial class WebcamPopup : Window
     private static readonly TimeSpan ToggleWindow = TimeSpan.FromMilliseconds(400);
 
     private readonly IPrinterBackend _backend;
-    // The side panel (stats strip plus the console and/or the print queue).
+    // The side panel (stats strip plus the console and/or module panels).
     private readonly bool _showPanel;
+    // The stats strip at the top of the side panel (turned off in Settings: hidden).
+    private readonly bool _showStats;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConsoleFeed? _console;
 
@@ -70,12 +75,23 @@ public partial class WebcamPopup : Window
     // Reused for every raw frame of the same size (Bambu), instead of a new bitmap per frame.
     private WriteableBitmap? _video;
 
-    public WebcamPopup(IPrinterBackend backend, bool showConsole, bool showQueue = false)
+    /// <param name="modules">Enabled modules: each gets a panel, beside the console.</param>
+    public WebcamPopup(IPrinterBackend backend, bool showConsole, IReadOnlyList<IModule>? modules = null, bool showStats = true)
     {
         InitializeComponent();
         _backend = backend;
-        showQueue &= backend is IPrintQueue;
-        _showPanel = showConsole || showQueue;
+        modules ??= [];
+        _modules = modules;
+        _showPanel = showConsole || modules.Count > 0;
+        _showStats = showStats;
+        if (!showStats)
+            StatsStrip.Visibility = Visibility.Collapsed;
+        else
+            IsVisibleChanged += (_, _) =>
+            {
+                if (IsVisible && _showPanel)
+                    ShowStrip(_lastStatus);
+            };
 
         ResetSize();
         MinWidth = VideoWidth / 2 + 2;
@@ -87,8 +103,7 @@ public partial class WebcamPopup : Window
             UpdateArrangement();
             if (showConsole)
                 _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
-            if (showQueue)
-                SetUpQueue((IPrintQueue)backend, consoleToo: showConsole);
+            SetUpPanels(showConsole, modules);
             ShowStatus(PrinterStatus.Connecting);
         }
         if (backend.SecondViewName != null)
@@ -173,8 +188,8 @@ public partial class WebcamPopup : Window
         Activate();
         Native.SetForegroundWindow(new WindowInteropHelper(this).Handle);
         _console?.Resume();
-        _queueWake = true; // fresh queue on opening, not up to a refresh later
-        _recentCount = RecentCount; // and back to the few newest uploads
+        foreach (var page in _pages)
+            page.Module?.OnPopupShown();
         StartSession();
     }
 
@@ -334,13 +349,88 @@ public partial class WebcamPopup : Window
         StatsList.Margin = new Thickness(6, 8, 6, 9);
     }
 
+    // ---- side panel: the console and module panels -------------------------------------
+
+    // What the side panel can show, each with its title bar button; one at a time.
+    private readonly List<(FrameworkElement View, ModulePanel? Module, System.Windows.Controls.Button Button)> _pages = new();
+    private int _page = -1;
+
+    private void SetUpPanels(bool showConsole, IReadOnlyList<IModule> modules)
+    {
+        if (showConsole)
+            AddPage("Console", "\uE756", ConsoleView, null);
+        else
+            ConsoleView.Visibility = Visibility.Collapsed;
+        foreach (var module in modules)
+        {
+            ModulePanel panel;
+            // A module that fails to start is left out, rather than taking the popup with it.
+            try { panel = module.CreatePanel(new ModuleContext(_backend, _lifetime.Token)); }
+            catch (Exception e)
+            {
+                App.LogError($"Module {module.Id}", e);
+                continue;
+            }
+            panel.Visibility = Visibility.Collapsed;
+            PanelHost.Children.Add(panel);
+            AddPage(module.Name, module.Glyph, panel, panel);
+        }
+        // Just one: it's simply the panel, no buttons needed.
+        PanelButtons.Visibility = _pages.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (_pages.Count > 0)
+            ShowPage(0);
+    }
+
+    private void AddPage(string name, string glyph, FrameworkElement view, ModulePanel? module)
+    {
+        var button = new System.Windows.Controls.Button
+        {
+            Content = glyph, FontSize = 13, Style = (Style)FindResource("PinButton"), ToolTip = name,
+        };
+        int index = _pages.Count;
+        button.Click += (_, _) => ShowPage(index);
+        PanelButtons.Children.Add(button);
+        _pages.Add((view, module, button));
+    }
+
+    private void ShowPage(int index)
+    {
+        if (index == _page)
+            return;
+        int old = _page;
+        _page = index;
+        for (int i = 0; i < _pages.Count; i++)
+        {
+            var (view, _, button) = _pages[i];
+            view.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+            // The one showing: highlighted like the pin when it's on.
+            if (i == index)
+                (button.Foreground, button.Background) = (PinnedBrush, SelectedPage);
+            else
+            {
+                button.ClearValue(ForegroundProperty);
+                button.ClearValue(BackgroundProperty);
+            }
+        }
+        if (old >= 0)
+            _pages[old].Module?.OnSelected(false);
+        _pages[index].Module?.OnSelected(true);
+    }
+
+    private static readonly Brush SelectedPage = Frozen(Color.FromRgb(0x2A, 0x2A, 0x2A));
+
     // ---- stats strip ---------------------------------------------------------------
 
     // The strip's tiles, kept while the printer is offline so they don't change then.
     private IReadOnlyList<string>? _statsTiles;
+    // The modules turned on, and the tiles made for the strip from them (null: it failed), by key.
+    private readonly IReadOnlyList<IModule> _modules;
+    private readonly Dictionary<string, ModuleTile?> _moduleTiles = new();
+    private PrinterStatus _lastStatus = PrinterStatus.Connecting;
+    private bool _stripDue;
 
-    /// <summary>True when the popup shows the stats strip (it tops the side panel: console and/or queue).</summary>
-    public bool HasStats => _showPanel;
+    /// <summary>True when the popup shows the stats strip (it tops the side panel: console and/or module panels).</summary>
+    public bool HasStats => _showPanel && _showStats;
 
     /// <summary>Latest printer status, for the stats strip above the console (UI thread).</summary>
     public void ShowStatus(PrinterStatus status)
@@ -349,19 +439,43 @@ public partial class WebcamPopup : Window
         // being printed, dimmer (and trimmed first when the window is narrow).
         string headline = StatusText.Lines(status)[0];
         TitleText.Text = $"{_backend.DisplayName} · {headline}";
-        string file = status.State is "printing" or "paused" && status.Filename.Length > 0 ? DisplayName(status.Filename) : "";
+        string file = status.State is "printing" or "paused" && status.Filename.Length > 0 ? StatusText.DisplayName(status.Filename) : "";
         TitleFile.Text = file.Length > 0 ? " · " + file : "";
         Title = TitleText.Text + TitleFile.Text; // the taskbar button, when pinned
         StateDot.Fill = status.Halted != null ? ErrorDot : status.Preparing ? PreparingDot : StateBrush(status.State);
-        QueueSawStatus(status);
+        foreach (var page in _pages)
+            page.Module?.OnStatus(status);
         // Offline (Klipper restarting, say) says nothing about it: the line stays until it's running.
         if (status.State != "offline")
             _console?.ShowHalted(status.Halted);
         if (!_showPanel)
             return;
+        _lastStatus = status;
+        // While hidden it waits: modules' tiles fetch only while it's on screen.
+        if (_showStats && IsVisible)
+            ShowStrip(status);
+        bool showProgress = status.State is "printing" or "paused" or "complete";
+        ProgressScale.ScaleX = showProgress ? Math.Clamp(status.Progress, 0, 1) : 0;
+        ProgressBar.Fill = status.State == "paused" ? ConsoleLine.TemperatureBrush : ProgressFill;
+    }
+
+    private void ShowStrip(PrinterStatus status)
+    {
         _statsTiles = status.Details?.Tiles ?? _statsTiles;
-        var tiles = StatusText.StatsTiles(status, tiles: _statsTiles);
-        var labels = StatusText.StatsLabels(status, _statsTiles);
+        // A module's tile shows only while its module is on.
+        var chosen = (_statsTiles ?? StatusText.DefaultTiles(null)).Where(t => !StatusText.IsModuleTile(t) || ModuleTile(t) != null).ToList();
+        var tiles = StatusText.StatsTiles(status, tiles: chosen);
+        var labels = StatusText.StatsLabels(status, chosen);
+        for (int i = 0; i < chosen.Count; i++)
+            if (StatusText.IsModuleTile(chosen[i]))
+            {
+                try { tiles[i] = ModuleTile(chosen[i])!.Show(status); }
+                catch (Exception e)
+                {
+                    App.LogError($"Tile {chosen[i]}", e);
+                    _moduleTiles[chosen[i]] = null; // left out from now on
+                }
+            }
         // None chosen in Settings: no strip.
         StatsStrip.Visibility = tiles.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         var items = new StatTile[tiles.Length];
@@ -369,9 +483,32 @@ public partial class WebcamPopup : Window
             items[i] = new StatTile(labels[i], tiles[i].Value, tiles[i].Detail,
                                     tiles[i].Highlight ? ConsoleLine.TemperatureBrush : ConsoleLine.ResponseBrush);
         StatsList.ItemsSource = items;
-        bool showProgress = status.State is "printing" or "paused" or "complete";
-        ProgressScale.ScaleX = showProgress ? Math.Clamp(status.Progress, 0, 1) : 0;
-        ProgressBar.Fill = status.State == "paused" ? ConsoleLine.TemperatureBrush : ProgressFill;
+    }
+
+    /// <summary>A module's tile in the strip, made the first time it's shown; null if its module is off (or it failed).</summary>
+    private ModuleTile? ModuleTile(string key)
+    {
+        if (_moduleTiles.TryGetValue(key, out var made))
+            return made;
+        ModuleTile? tile = null;
+        if (ModuleRegistry.FindTile(key) is var (module, info) && _modules.Contains(module))
+        {
+            try
+            {
+                tile = module.CreateTile(info.Id, new ModuleContext(_backend, _lifetime.Token));
+                // Its own data changed: show it again, once, soon.
+                tile.Changed += () => Dispatcher.BeginInvoke(() =>
+                {
+                    if (_stripDue || _lifetime.IsCancellationRequested)
+                        return;
+                    _stripDue = true;
+                    Dispatcher.BeginInvoke(() => { _stripDue = false; ShowStrip(_lastStatus); }, DispatcherPriority.Background);
+                });
+            }
+            catch (Exception e) { App.LogError($"Tile {key}", e); }
+        }
+        _moduleTiles[key] = tile;
+        return tile;
     }
 
     private static readonly Brush ProgressFill = Frozen(Color.FromRgb(0x3F, 0xB9, 0x50));
@@ -512,7 +649,7 @@ public partial class WebcamPopup : Window
         }
     }
 
-    private static BitmapSource? TryDecode(byte[] jpg)
+    internal static BitmapSource? TryDecode(byte[] jpg)
     {
         try
         {

@@ -86,20 +86,11 @@ public static class PrinterBackends
                                        webcamName: config.WebcamName, webcamStream: config.WebcamStream,
                                        secondViewName: config.U1Touchscreen ? "" : config.SecondViewName,
                                        secondViewStream: config.U1Touchscreen ? "" : config.SecondViewStream,
-                                       remoteScreen: config.U1Touchscreen, statsTiles: config.StatsTiles)
+                                       remoteScreen: config.U1Touchscreen, statsTiles: config.ShownStatsTiles)
                 : new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey,
                                        webcamName: config.WebcamName, secondViewName: config.SecondViewName,
                                        webcamStream: config.WebcamStream, secondViewStream: config.SecondViewStream,
-                                       statsTiles: config.StatsTiles);
-
-    /// <summary>Whether the printer has a print queue, for the settings window. Throws if it can't be reached.</summary>
-    public static async Task<bool> HasPrintQueueAsync(AppConfig config, CancellationToken ct = default)
-    {
-        if (config.IsBambu)
-            return false;
-        using var backend = new MoonrakerBackend(config.MoonrakerUrl, config.MoonrakerApiKey);
-        return await backend.HasJobQueueAsync(ct);
-    }
+                                       statsTiles: config.ShownStatsTiles);
 
     /// <summary>Whether a U1 Extended serves its touchscreen (Remote Screen turned on), for the settings window.</summary>
     public static async Task<bool> HasTouchscreenAsync(AppConfig config, CancellationToken ct = default)

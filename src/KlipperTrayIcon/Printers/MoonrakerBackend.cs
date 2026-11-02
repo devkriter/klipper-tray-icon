@@ -90,13 +90,19 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
 
     // ---- HTTP helpers ----------------------------------------------------
 
-    private async Task<JsonDocument> GetJsonAsync(string pathAndQuery, TimeSpan timeout, CancellationToken ct)
+    private Task<JsonDocument> GetJsonAsync(string pathAndQuery, TimeSpan timeout, CancellationToken ct) =>
+        RequestJsonAsync(HttpMethod.Get, pathAndQuery, null, timeout, ct);
+
+    private async Task<JsonDocument> RequestJsonAsync(HttpMethod method, string pathAndQuery, object? json, TimeSpan timeout,
+                                                      CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(timeout);
-        using var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + pathAndQuery);
+        using var request = new HttpRequestMessage(method, BaseUrl + pathAndQuery);
         foreach (var (name, value) in _headers)
             request.Headers.TryAddWithoutValidation(name, value);
+        if (json != null)
+            request.Content = new StringContent(JsonSerializer.Serialize(json), System.Text.Encoding.UTF8, "application/json");
         try
         {
             using var response = await _http.SendAsync(request, cts.Token);
@@ -342,6 +348,9 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
 
     public Task<JsonDocument> GetJsonAsync(string pathAndQuery, CancellationToken ct, TimeSpan? timeout = null) =>
         GetJsonAsync(pathAndQuery, timeout ?? TimeSpan.FromSeconds(5), ct);
+
+    public Task<JsonDocument> PostJsonAsync(string pathAndQuery, object? json, CancellationToken ct, TimeSpan? timeout = null) =>
+        RequestJsonAsync(HttpMethod.Post, pathAndQuery, json, timeout ?? TimeSpan.FromSeconds(5), ct);
 
     public async Task<byte[]?> GetImageAsync(string pathAndQuery, CancellationToken ct, TimeSpan? timeout = null) =>
         (await FetchImageAsync(BaseUrl + pathAndQuery, null, timeout ?? TimeSpan.FromSeconds(5), ct)).Image;

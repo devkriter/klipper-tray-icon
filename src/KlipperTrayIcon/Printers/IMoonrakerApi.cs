@@ -17,6 +17,8 @@ public interface IMoonrakerApi
     string BaseUrl { get; }
     /// <summary>A GET, e.g. "/server/job_queue/status", parsed. The default timeout is 5 seconds.</summary>
     Task<JsonDocument> GetJsonAsync(string pathAndQuery, CancellationToken ct, TimeSpan? timeout = null);
+    /// <summary>A POST whose answer is needed, e.g. "/server/spoolman/proxy", parsed; json (if any) is sent as the body.</summary>
+    Task<JsonDocument> PostJsonAsync(string pathAndQuery, object? json, CancellationToken ct, TimeSpan? timeout = null);
     /// <summary>A request that changes something; json (if any) is sent as the body.</summary>
     Task SendAsync(HttpMethod method, string pathAndQuery, object? json, CancellationToken ct);
     /// <summary>A PNG or JPEG (e.g. a thumbnail), or null if it's missing or not an image.</summary>

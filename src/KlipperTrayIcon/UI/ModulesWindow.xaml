@@ -46,8 +46,16 @@
                             <ColumnDefinition />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="Icon" Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="16"
-                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <Grid x:Name="Icon" VerticalAlignment="Center" Margin="0,0,10,0">
+                            <TextBlock Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="16" />
+                            <!-- Or its drawn icon (IModule.Icon), in the text's colour. -->
+                            <Viewbox Width="16" Height="16">
+                                <Canvas Width="16" Height="16">
+                                    <Path Data="{Binding Module.Icon}" StrokeThickness="1.3"
+                                          Stroke="{Binding (TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                                </Canvas>
+                            </Viewbox>
+                        </Grid>
                         <StackPanel x:Name="Words" Grid.Column="1" VerticalAlignment="Center">
                             <TextBlock Text="{Binding Module.Name}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding State}" FontSize="11" Opacity="0.65" TextTrimming="CharacterEllipsis" />
@@ -75,8 +83,15 @@
                         <ColumnDefinition />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="22"
-                               VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <Grid VerticalAlignment="Center" Margin="0,0,12,0">
+                        <TextBlock Text="{Binding Module.Glyph}" FontFamily="{StaticResource Icons}" FontSize="22" />
+                        <Viewbox Width="22" Height="22">
+                            <Canvas Width="16" Height="16">
+                                <Path Data="{Binding Module.Icon}" StrokeThickness="1.3"
+                                      Stroke="{Binding (TextElement.Foreground), RelativeSource={RelativeSource Self}}" />
+                            </Canvas>
+                        </Viewbox>
+                    </Grid>
                     <TextBlock Grid.Column="1" Text="{Binding Module.Name}" FontSize="20" FontWeight="SemiBold"
                                TextWrapping="Wrap" VerticalAlignment="Center" />
                     <CheckBox x:Name="OnCheck" Grid.Column="2" Content="On" IsChecked="{Binding IsOn}" IsEnabled="{Binding Available}"

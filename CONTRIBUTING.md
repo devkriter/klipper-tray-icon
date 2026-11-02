@@ -33,7 +33,8 @@ The print queue (`src/KlipperTrayIcon/Modules/PrintQueue/`) is a complete module
      `Details` (a paragraph or two on what it does and how to use it), `Needs` (what the printer
      must have, e.g. a Moonraker component), `HelpUrl` (a page with more) and `Author` (you).
    - `Glyph`: its icon (title bar button and Settings), a [Segoe Fluent Icons](https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font)
-     character such as `""`.
+     character such as `""`. If Segoe has nothing that fits, leave it empty and draw one
+     instead with `Icon`: WPF path markup in a 16×16 box, drawn in lines (the Spoolman module's spool).
    - `Supports(printer)`: whether it works with this kind of printer at all. For Klipper only, use
      `printer is IMoonrakerApi`. No network calls here.
    - `CheckAsync(printer, ct)` (optional): asks the printer whether it has what the module needs.

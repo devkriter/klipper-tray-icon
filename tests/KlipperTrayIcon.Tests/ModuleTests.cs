@@ -19,7 +19,9 @@ public class ModuleTests
             Assert.Matches("^[a-z0-9_]+$", module.Id); // config.json keys' style
             Assert.False(string.IsNullOrWhiteSpace(module.Name));
             Assert.False(string.IsNullOrWhiteSpace(module.Description));
-            Assert.False(string.IsNullOrEmpty(module.Glyph));
+            Assert.False(string.IsNullOrEmpty(module.Icon ?? module.Glyph)); // a drawn icon, or a glyph
+            if (module.Icon != null)
+                System.Windows.Media.Geometry.Parse(module.Icon); // throws if it isn't path markup
             // The Modules window's details: optional, but a link must open in the browser.
             Assert.NotNull(module.Details);
             Assert.NotNull(module.Needs);

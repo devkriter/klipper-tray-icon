@@ -376,7 +376,7 @@ public partial class WebcamPopup : Window
             }
             panel.Visibility = Visibility.Collapsed;
             PanelHost.Children.Add(panel);
-            AddPage(module.Name, module.Glyph, panel, panel);
+            AddPage(module.Name, module.Icon != null ? DrawnIcon(module.Icon) : module.Glyph, panel, panel);
         }
         // Just one: it's simply the panel, no buttons needed.
         PanelButtons.Visibility = _pages.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
@@ -384,7 +384,20 @@ public partial class WebcamPopup : Window
             ShowPage(0);
     }
 
-    private void AddPage(string name, string glyph, FrameworkElement view, ModulePanel? module)
+    /// <summary>A module's drawn icon (<see cref="IModule.Icon"/>), at the size of the title bar's glyphs.</summary>
+    private static System.Windows.Controls.Viewbox DrawnIcon(string path)
+    {
+        var line = new System.Windows.Shapes.Path { Data = Geometry.Parse(path), StrokeThickness = 1.3 };
+        // In the button's colour, which turns blue while its page shows.
+        line.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, new System.Windows.Data.Binding("Foreground")
+        {
+            RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,
+                                                                    typeof(System.Windows.Controls.Button), 1),
+        });
+        return new System.Windows.Controls.Viewbox { Width = 14, Height = 14, Child = new System.Windows.Controls.Canvas { Width = 16, Height = 16, Children = { line } } };
+    }
+
+    private void AddPage(string name, object glyph, FrameworkElement view, ModulePanel? module)
     {
         var button = new System.Windows.Controls.Button
         {

@@ -23,6 +23,11 @@ public interface IModule
     string Description { get; }
     /// <summary>Its title bar button: a Segoe Fluent Icons glyph, e.g. "" (a list).</summary>
     string Glyph { get; }
+    /// <summary>
+    /// Instead of a glyph, for an icon Segoe doesn't have: a drawing, as WPF path markup in a 16×16 box
+    /// (e.g. "M2,8 H14"). It's drawn in lines, in the text's colour. Null: the Glyph is used.
+    /// </summary>
+    string? Icon => null;
 
     /// <summary>Everything it does and how to use it, a paragraph or two. Shown when it's picked in Settings.</summary>
     string Details => Description;

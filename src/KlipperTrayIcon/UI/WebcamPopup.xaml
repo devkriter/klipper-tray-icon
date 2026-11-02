@@ -72,8 +72,8 @@
                     <Button x:Name="TouchButton" FontSize="13" Visibility="Collapsed"
                             Style="{StaticResource PinButton}" Click="OnTouchLockClick" />
                     <!-- What the side panel shows: the console, or a module's panel. One button each,
-                         side by side (only when there's more than one); filled in code. -->
-                    <StackPanel x:Name="PanelButtons" Orientation="Horizontal" Margin="0,0,4,0" />
+                         side by side (only when there's more than one), the console's on the right; filled in code. -->
+                    <StackPanel x:Name="PanelButtons" Orientation="Horizontal" />
                     <Button x:Name="PinButton" Content="&#xE718;" FontSize="13"
                             Style="{StaticResource PinButton}" Click="OnPinClick"
                             ToolTip="Pin: keep open when you click elsewhere" />

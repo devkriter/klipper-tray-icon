@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.12.1] - 2026-11-02
+### Fixed
+- The pin, once clicked, lost its needle: the filled pin is now drawn whole.
+- The console and module buttons sat a few pixels away from the pin; all title bar buttons are
+  now evenly spaced.
+
+### Changed
+- The console's title bar button is now on the right, next to the pin; modules' buttons go to its
+  left.
+
 ## [2.12.0] - 2026-11-02
 ### Added
 - Stats strip: a *Time elapsed* tile to pick in Settings, showing how long the print has been

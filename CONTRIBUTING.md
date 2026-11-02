@@ -69,8 +69,9 @@ The print queue (`src/KlipperTrayIcon/Modules/PrintQueue/`) is a complete module
    it: fetch your data in the background (not more than every few seconds) and call `Refresh()`
    when it changes. The print queue's `QueueTile.cs` is the example.
 5. **Register it**: add one line to `ModuleRegistry.All` (`Modules/ModuleRegistry.cs`). The order
-   there is the order of the title bar buttons and of the Modules window's list. This is the only change
-   needed outside your folder.
+   there is the order of the Modules window's list. In the title bar the console's button stays on
+   the right, next to the pin, and each module's goes to the left of the ones before it. This is
+   the only change needed outside your folder.
 6. **Test it**: add `tests/KlipperTrayIcon.Tests/YourModuleTests.cs`. `PrintQueueTests.cs` shows
    how to test API calls against a fake Moonraker.
 7. **Document it**: a line in the README's feature list and in CHANGELOG.md under *Unreleased*.

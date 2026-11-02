@@ -225,7 +225,10 @@ public partial class WebcamPopup : Window
         // taskbar button so you can get back to it.
         Topmost = !_pinned;
         ShowInTaskbar = _pinned;
-        PinButton.Content = _pinned ? "" : ""; // filled pin / pin
+        // Filled: the fill glyph has no needle, so it's drawn over the outline.
+        PinButton.Content = _pinned
+            ? new System.Windows.Controls.Grid { Children = { new System.Windows.Controls.TextBlock { Text = "" }, new System.Windows.Controls.TextBlock { Text = "" } } }
+            : "";
         PinButton.Foreground = _pinned ? PinnedBrush : Brushes.White;
         PinButton.ToolTip = _pinned ? "Unpin: close when you click elsewhere" : "Pin: keep open when you click elsewhere";
         Activate();
@@ -389,7 +392,8 @@ public partial class WebcamPopup : Window
         };
         int index = _pages.Count;
         button.Click += (_, _) => ShowPage(index);
-        PanelButtons.Children.Add(button);
+        // The console's is next to the pin; each module's goes to the left of the ones before it.
+        PanelButtons.Children.Insert(0, button);
         _pages.Add((view, module, button));
     }
 

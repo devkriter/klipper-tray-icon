@@ -13,6 +13,7 @@ public static class ModuleRegistry
     public static IReadOnlyList<IModule> All { get; } =
     [
         new PrintQueue.PrintQueueModule(),
+        new Spoolman.SpoolmanModule(),
     ];
 
     /// <summary>The modules the user turned on that work with this printer, in <see cref="All"/>'s order.</summary>

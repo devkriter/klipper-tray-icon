@@ -31,6 +31,13 @@ The icon updates dynamically to show a circular progress bar corresponding to th
     into the queue where you want it. ▶ on any row prints that file now. It and *Start next* ask
     for a second click. Its *QUEUE* tile for the stats strip shows how many jobs are queued and
     which is next.
+  - **Spoolman** (Klipper with Spoolman connected to Moonraker): the spool in the printer, with
+    what's left in grams and metres, and while printing whether that's enough for the rest of the
+    print and the material the file was sliced for. Printers with several toolheads (T0, T1, …
+    macros with a `spool_id`, as Mainsail and Fluidd use them) get a card per toolhead. Below are
+    your other spools, most recently used first, with a filter; hover one for its details, *Use*
+    to switch (a second click while printing). Its *SPOOL* tile shows what's left on the spool in
+    use, in amber when it's low or short for the print.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
@@ -204,7 +211,7 @@ For Bambu Lab (see `config.example.bambu.json`):
 }
 ```
 
-`modules` lists the modules turned on, e.g. `["print_queue"]`.
+`modules` lists the modules turned on, e.g. `["print_queue", "spoolman"]`.
 
 `show_stats` shows the stats strip; `stats_tiles` lists its tiles, e.g. `["nozzle", "bed", "progress",
 "elapsed", "print_queue:queue", "time_left"]` (null: the default).

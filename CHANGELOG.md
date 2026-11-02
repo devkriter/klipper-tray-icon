@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- *Spoolman* module (Klipper): a Filament page with the spool in the printer (what's left in grams
+  and metres, drawn as a ring and a bar) and, while printing, whether it's enough for the rest of
+  the print and the file's material. On printers with several toolheads (T0, T1, … macros with a
+  `spool_id`), one card per toolhead, the one in use marked. Below are the other spools, most
+  recently used first, with a filter; hover one for its details, *Use* to switch (a second click
+  while printing). Its *SPOOL* tile for the stats strip shows what's left on the spool in use, in
+  amber when it's low or short. It all goes through Moonraker's `[spoolman]`, so there's nothing
+  more to set up.
+- Modules can draw their own icon when Segoe Fluent Icons has none (`IModule.Icon`), and can POST
+  to Moonraker and read the answer (`IMoonrakerApi.PostJsonAsync`).
+
 ## [2.12.1] - 2026-11-02
 ### Fixed
 - The pin, once clicked, lost its needle: the filled pin is now drawn whole.

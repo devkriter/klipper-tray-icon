@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.13.0] - 2026-11-02
 ### Added
 - *Spoolman* module (Klipper): a Filament page with the spool in the printer (what's left in grams
   and metres, drawn as a ring and a bar) and, while printing, whether it's enough for the rest of

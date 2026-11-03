@@ -20,7 +20,7 @@ namespace KlipperTrayIcon.Modules.Spoolman;
 /// One of the other spools in the list. Fraction is NaN without a starting weight. The tooltip's
 /// facts are lines of labels and their values.
 /// </summary>
-public sealed record SpoolRow(Spool Spool, string Title, string Sub, string Weight, string Length, bool Low, double Fraction,
+public sealed record SpoolRow(Spool Spool, string Title, string Sub, string Weight, string Length, bool Low, bool VeryLow, double Fraction,
                               string Use, bool Armed, string TipTitle, string TipId, string TipLabels, string TipValues);
 
 /// <summary>
@@ -36,6 +36,7 @@ public partial class SpoolmanPanel : ModulePanel
     private readonly SpoolmanSource _source;
     private readonly IPrinterBackend _printer;
     private readonly CancellationToken _lifetime;
+    private readonly Levels _levels;
     private volatile bool _wake = true, _listWake = true;
     private PrinterStatus _status = PrinterStatus.Connecting;
     private volatile string _filename = "";
@@ -56,6 +57,7 @@ public partial class SpoolmanPanel : ModulePanel
         _source = source;
         _printer = context.Printer;
         _lifetime = context.Lifetime;
+        _levels = Levels.From(context);
         SpoolList.ItemsSource = _rows;
         _disarm.Tick += (_, _) => Disarm();
         ShowCards();
@@ -219,7 +221,7 @@ public partial class SpoolmanPanel : ModulePanel
         words.Children.Add(Text(Join(spool.Vendor, $"#{spool.Id}", spool.Location), 11.5, DimBrush));
         Add(grid, words, 1, 0);
         var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
-        left.Children.Add(Text(spool.Remaining is double g ? Spools.Grams(g) : "?", 18, spool.Remaining is < Spools.LowGrams ? WarnBrush : TextBrush,
+        left.Children.Add(Text(spool.Remaining is double g ? Spools.Grams(g) : "?", 18, GramsBrush(spool, check),
                                bold: true, right: true));
         if (spool.Length is double mm)
             left.Children.Add(Text($"{Spools.Metres(mm)} left", 11.5, DimBrush, right: true));
@@ -274,14 +276,15 @@ public partial class SpoolmanPanel : ModulePanel
             words.Children.Add(Text(spool.Title, 12.5, TextBrush, bold: true));
             words.Children.Add(Text(Join(inUse ? "In use" : "", spool.Material, spool.Fraction is double f ? Spools.Percent(f) : "",
                                          spool.Location), 11, DimBrush));
+            var check = Spools.Check(spool, state, index, _status);
             var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
             left.Children.Add(Text(spool.Remaining is double g ? Spools.Grams(g) : "?", 13,
-                                   spool.Remaining is < Spools.LowGrams ? WarnBrush : TextBrush, bold: true, right: true));
+                                   GramsBrush(spool, check), bold: true, right: true));
             if (spool.Length is double mm)
                 left.Children.Add(Text(Spools.Metres(mm), 11, DimBrush, right: true));
             Add(grid, left, 3, 0);
             var lines = new StackPanel { Margin = new Thickness(0, 3, 0, 0) };
-            foreach (var line in NeedLines(spool, Spools.Check(spool, state, index, _status), compact: true))
+            foreach (var line in NeedLines(spool, check, compact: true))
                 lines.Children.Add(line);
             if (lines.Children.Count > 0)
                 Add(grid, lines, 1, 1, span: 3);
@@ -319,12 +322,10 @@ public partial class SpoolmanPanel : ModulePanel
                               ($"; the spool is {spool.Material}", false));
         if (check.Needed is not double needed)
             yield break;
-        if (Spools.Short(spool, check) is double missing)
-            yield return compact
-                ? Line(WarnBrush, "⚠ ", ("Needs ", false), (Spools.Grams(needed), true), (": ", false), ($"{Spools.Grams(missing)} short", true))
-                : Line(WarnBrush, "⚠ ", ("This print needs ", false), (Spools.Grams(needed), true), (": about ", false),
-                       ($"{Spools.Grams(missing)} short", true));
-        else if (spool.Remaining is double left)
+        // Not enough: no line, the grams left are in amber (GramsBrush).
+        if (Spools.Short(spool, check) != null)
+            yield break;
+        if (spool.Remaining is double left)
             yield return compact
                 ? Line(DimBrush, "✓ ", ("Needs ", false), (Spools.Grams(needed), true), ($" more, {Spools.Grams(left - needed)} to spare", false))
                 : Line(DimBrush, "✓ ", ("This print needs ", false), (Spools.Grams(needed), true),
@@ -346,6 +347,12 @@ public partial class SpoolmanPanel : ModulePanel
             });
         return line;
     }
+
+    /// <summary>The colour of the grams left: red when nearly empty, amber when low or it won't last the print.</summary>
+    private Brush GramsBrush(Spool spool, SpoolCheck check) =>
+        spool.Remaining < _levels.Empty ? EmptyBrush
+        : spool.Remaining < _levels.Low || Spools.Short(spool, check) != null ? WarnBrush
+        : TextBrush;
 
     private Border EmptyBox(string bold, string rest)
     {
@@ -465,7 +472,7 @@ public partial class SpoolmanPanel : ModulePanel
             facts.Add(("Note", s.Comment.ReplaceLineEndings(" ")));
         return new SpoolRow(s, s.Title, Join(s.Material, s.Location, Spools.Used(s.LastUsed)),
                             s.Remaining is double g ? Spools.Grams(g) : "", s.Length is double l ? Spools.Metres(l) : "",
-                            s.Remaining is < Spools.LowGrams, s.Fraction ?? double.NaN,
+                            s.Remaining < _levels.Low, s.Remaining < _levels.Empty, s.Fraction ?? double.NaN,
                             armed ? "Click again to switch" : use, armed,
                             s.Title, $"· #{s.Id}", string.Join("\n", facts.Select(f => f.Item1)), string.Join("\n", facts.Select(f => f.Item2)));
     }
@@ -580,6 +587,7 @@ public partial class SpoolmanPanel : ModulePanel
                                   DimBrush = Frozen(Color.FromRgb(0x8A, 0x8A, 0x8A)),
                                   OkBrush = Frozen(Color.FromRgb(0x3F, 0xB9, 0x50)),
                                   WarnBrush = Frozen(Color.FromRgb(0xE3, 0xB3, 0x41)),
+                                  EmptyBrush = Frozen(Color.FromRgb(0xFF, 0x7B, 0x72)),
                                   BlueBrush = Frozen(Color.FromRgb(0x60, 0xCD, 0xFF)),
                                   OnBlueBrush = Frozen(Color.FromRgb(0x00, 0x20, 0x33)),
                                   LabelBrush = Frozen(Color.FromRgb(0x33, 0x33, 0x33)),

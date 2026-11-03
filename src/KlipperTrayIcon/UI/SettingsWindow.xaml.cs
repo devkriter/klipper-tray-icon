@@ -34,6 +34,8 @@ public partial class SettingsWindow : Window
     private readonly Updater? _updater;
     // The ids of the modules turned on (registry order), as picked in the Modules window.
     private List<string> _modules = [];
+    // Modules' settings, as changed in the Modules window (by module id, then setting id).
+    private Dictionary<string, Dictionary<string, double>> _moduleSettings = [];
     // Why each module can't be used with the printer last reached (null: it can).
     private readonly Dictionary<IModule, string?> _moduleProblems = new();
     // Open while the user picks modules, to show what the printer says once it answers.
@@ -64,6 +66,7 @@ public partial class SettingsWindow : Window
         ApiKeyHidden.Password = config.MoonrakerApiKey;
         ConsoleCheck.IsChecked = config.WebcamConsole;
         _modules = ModuleRegistry.All.Select(m => m.Id).Where(config.Modules.Contains).ToList();
+        _moduleSettings = config.ModuleSettings.ToDictionary(p => p.Key, p => new Dictionary<string, double>(p.Value));
         ShowModules();
         // Sensors already chosen stay listed even before the printer answers.
         _sensors = config.StatsTiles?.Where(StatusText.IsSensorTile).ToList() ?? [];
@@ -237,6 +240,7 @@ public partial class SettingsWindow : Window
         // Ids this version doesn't know (saved by a newer one) are kept.
         config.Modules = config.Modules.Where(id => ModuleRegistry.All.All(m => m.Id != id))
             .Concat(_modules).ToList();
+        config.ModuleSettings = _moduleSettings;
         config.CheckForUpdates = UpdateCheck.IsChecked == true;
         return config;
     }
@@ -473,11 +477,11 @@ public partial class SettingsWindow : Window
 
     private void OnModulesClick(object sender, RoutedEventArgs e)
     {
-        _modulesWindow = new ModulesWindow(_modules, ModuleProblem) { Owner = this };
+        _modulesWindow = new ModulesWindow(_modules, ModuleProblem, _moduleSettings) { Owner = this };
         try
         {
             if (_modulesWindow.ShowDialog() == true && _modulesWindow.Result is { } picked)
-                _modules = picked.ToList();
+                (_modules, _moduleSettings) = (picked.ToList(), _modulesWindow.SettingsResult);
         }
         finally { _modulesWindow = null; }
         ShowModules();

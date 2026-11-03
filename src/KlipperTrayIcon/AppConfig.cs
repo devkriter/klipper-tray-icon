@@ -32,6 +32,8 @@ public sealed class AppConfig
     [JsonPropertyName("second_view_stream")] public string SecondViewStream { get; set; } = "";
     /// <summary>The modules turned on, by id (see Modules/ModuleRegistry.cs). All off at first.</summary>
     [JsonPropertyName("modules")] public List<string> Modules { get; set; } = [];
+    /// <summary>Modules' settings, by module id and then setting id; only those the user changed.</summary>
+    [JsonPropertyName("module_settings")] public Dictionary<string, Dictionary<string, double>> ModuleSettings { get; set; } = [];
     /// <summary>Before modules (2.11 and earlier): the print queue's on/off. Read once, then saved as a module.</summary>
     [JsonPropertyName("print_queue"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? LegacyPrintQueue { get; set; }

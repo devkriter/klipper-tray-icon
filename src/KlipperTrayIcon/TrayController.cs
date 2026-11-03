@@ -203,7 +203,7 @@ public sealed class TrayController : IDisposable
     {
         _popup = _backend.SupportsWebcam
             ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole,
-                              ModuleRegistry.Enabled(_config, _backend), _config.ShowStats)
+                              ModuleRegistry.Enabled(_config, _backend), _config.ShowStats, _config.ModuleSettings)
             : null;
         if (_popup is { HasStats: true } popup)
             popup.IsVisibleChanged += (_, _) =>

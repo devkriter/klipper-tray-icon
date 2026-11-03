@@ -261,6 +261,9 @@ public class SpoolmanTests
         Assert.Equal([10.0, 0, 40], file.Weights);
         Assert.Equal(["PLA", "PLA", "PETG"], file.Types);
         Assert.Equal(FileFilament.None.Types, SpoolmanApi.ReadFileFilament(default).Types);
+        // OrcaSlicer's list, as newer Moonraker passes it on.
+        using var orca = JsonDocument.Parse("""{"filament_weights":[0.0,0.0,17.5],"filament_type":"[\"ASA\", \"ASA\", \"ABS\"]"}""");
+        Assert.Equal(["ASA", "ASA", "ABS"], SpoolmanApi.ReadFileFilament(orca.RootElement).Types);
     }
 
     private static Spool Spool(int id, string material, double? left, double? start = 1000) =>
@@ -294,6 +297,15 @@ public class SpoolmanTests
         Assert.False(Spools.SameMaterial("ASA", "PLA"));
         Assert.Null(Spools.Check(Spool(1, "PLA", 500), State(new FileFilament(10, [], ["PLA+"]), Spool(1, "PLA", 500)), -1,
                                  Printing(0)).WrongMaterial);
+
+        // One tool, a file with three filament slots of which only the third is printed: only it counts.
+        var abs = Spool(2, "ABS", 108);
+        var slots = new FileFilament(17.5, [0, 0, 17.5], ["ASA", "ASA", "ABS"]);
+        Assert.Null(Spools.Check(abs, State(slots, abs), -1, Printing(0)).WrongMaterial);
+        Assert.Equal("ABS", Spools.Check(asa, State(slots, asa), -1, Printing(0)).WrongMaterial);
+        // No weights per slot: any of its materials will do.
+        Assert.Null(Spools.Check(abs, State(slots with { Weights = [] }, abs), -1, Printing(0)).WrongMaterial);
+        Assert.Equal("ASA or ABS", Spools.Check(low, State(slots with { Weights = [] }, low), -1, Printing(0)).WrongMaterial);
     }
 
     [Fact]
@@ -317,29 +329,32 @@ public class SpoolmanTests
 
         // The tile shows the tool in use.
         Assert.Equal(new StatusText.Tile("310 g", "sliced for PETG", Highlight: true),
-                     Spools.Tile(perTool, status));
-        Assert.Equal(new StatusText.Tile("310 g", "ASA · 31%"), Spools.Tile(totalOnly, status));
+                     Spools.Tile(perTool, status, Levels.Default));
+        Assert.Equal(new StatusText.Tile("310 g", "ASA · 31%"), Spools.Tile(totalOnly, status, Levels.Default));
     }
 
     [Fact]
     public void TheSpoolTile()
     {
         var idle = new PrinterStatus("standby", 0);
-        Assert.Equal(new StatusText.Tile("—", ""), Spools.Tile(null, idle));
+        Assert.Equal(new StatusText.Tile("—", ""), Spools.Tile(null, idle, Levels.Default));
         var none = new SpoolmanState(new SpoolmanStatus(true, 0, null), ToolSpools.None, new Dictionary<int, Spool>(), FileFilament.None);
-        Assert.Equal(new StatusText.Tile("—", "none picked"), Spools.Tile(none, idle));
+        Assert.Equal(new StatusText.Tile("—", "none picked"), Spools.Tile(none, idle, Levels.Default));
 
         var asa = Spool(7, "ASA", 310);
-        Assert.Equal(new StatusText.Tile("310 g", "ASA · 31%"), Spools.Tile(State(FileFilament.None, asa), idle));
+        Assert.Equal(new StatusText.Tile("310 g", "ASA · 31%"), Spools.Tile(State(FileFilament.None, asa), idle, Levels.Default));
         // Not enough left for the rest of the print: amber, and by how much.
         var shortSpool = Spool(3, "ASA", 85);
         Assert.Equal(new StatusText.Tile("85 g", "35 g short", Highlight: true),
-                     Spools.Tile(State(new FileFilament(120, [], ["ASA"]), shortSpool), Printing(0)));
+                     Spools.Tile(State(new FileFilament(120, [], ["ASA"]), shortSpool), Printing(0), Levels.Default));
         // Low, but enough: amber too.
         Assert.Equal(new StatusText.Tile("85 g", "ASA · 9%", Highlight: true),
-                     Spools.Tile(State(new FileFilament(120, [], ["ASA"]), shortSpool), Printing(0.9)));
+                     Spools.Tile(State(new FileFilament(120, [], ["ASA"]), shortSpool), Printing(0.9), Levels.Default));
         // No starting weight: no percentage.
-        Assert.Equal(new StatusText.Tile("500 g", "PLA"), Spools.Tile(State(FileFilament.None, Spool(1, "PLA", 500, null)), idle));
+        Assert.Equal(new StatusText.Tile("500 g", "PLA"), Spools.Tile(State(FileFilament.None, Spool(1, "PLA", 500, null)), idle, Levels.Default));
+        // Low as set in the Modules window.
+        Assert.False(Spools.Tile(State(FileFilament.None, asa), idle, Levels.Default).Highlight);
+        Assert.True(Spools.Tile(State(FileFilament.None, asa), idle, new Levels(400, 50)).Highlight);
     }
 
     [Fact]

@@ -39,5 +39,11 @@ public sealed class SpoolmanModule : IModule
     public IReadOnlyList<TileInfo> Tiles { get; } = [new("spool", "Spool in use", "SPOOL")];
 
     public ModuleTile CreateTile(string id, ModuleContext context) =>
-        new SpoolTile(SpoolmanSource.For((IMoonrakerApi)context.Printer), context.Lifetime);
+        new SpoolTile(SpoolmanSource.For((IMoonrakerApi)context.Printer), context.Lifetime, Levels.From(context));
+
+    internal static readonly ModuleSetting Low = new("low", "Low below", 100, "g",
+        "The grams left turn amber, as they do when a spool won't last the print.");
+    internal static readonly ModuleSetting Empty = new("empty", "Nearly empty below", 50, "g", "The grams left turn red.");
+
+    public IReadOnlyList<ModuleSetting> Settings { get; } = [Low, Empty];
 }

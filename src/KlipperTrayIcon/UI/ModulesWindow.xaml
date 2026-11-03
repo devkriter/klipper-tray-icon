@@ -113,6 +113,12 @@
                     </Grid>
                 </Border>
 
+                <!-- Its settings: a number box for each. -->
+                <StackPanel x:Name="SettingsPanel">
+                    <TextBlock Text="SETTINGS" Style="{StaticResource Heading}" />
+                    <StackPanel x:Name="SettingsList" />
+                </StackPanel>
+
                 <TextBlock x:Name="DetailsText" Text="{Binding Module.Details}" TextWrapping="Wrap" Margin="0,14,0,0" />
 
                 <StackPanel x:Name="NeedsPanel">

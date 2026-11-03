@@ -76,12 +76,15 @@ public partial class WebcamPopup : Window
     private WriteableBitmap? _video;
 
     /// <param name="modules">Enabled modules: each gets a panel, beside the console.</param>
-    public WebcamPopup(IPrinterBackend backend, bool showConsole, IReadOnlyList<IModule>? modules = null, bool showStats = true)
+    /// <param name="moduleSettings">Each module's saved settings (by module id).</param>
+    public WebcamPopup(IPrinterBackend backend, bool showConsole, IReadOnlyList<IModule>? modules = null, bool showStats = true,
+                       IReadOnlyDictionary<string, Dictionary<string, double>>? moduleSettings = null)
     {
         InitializeComponent();
         _backend = backend;
         modules ??= [];
         _modules = modules;
+        _moduleSettings = moduleSettings ?? new Dictionary<string, Dictionary<string, double>>();
         _showPanel = showConsole || modules.Count > 0;
         _showStats = showStats;
         if (!showStats)
@@ -368,7 +371,7 @@ public partial class WebcamPopup : Window
         {
             ModulePanel panel;
             // A module that fails to start is left out, rather than taking the popup with it.
-            try { panel = module.CreatePanel(new ModuleContext(_backend, _lifetime.Token)); }
+            try { panel = module.CreatePanel(Context(module)); }
             catch (Exception e)
             {
                 App.LogError($"Module {module.Id}", e);
@@ -442,6 +445,9 @@ public partial class WebcamPopup : Window
     private IReadOnlyList<string>? _statsTiles;
     // The modules turned on, and the tiles made for the strip from them (null: it failed), by key.
     private readonly IReadOnlyList<IModule> _modules;
+    private readonly IReadOnlyDictionary<string, Dictionary<string, double>> _moduleSettings;
+
+    private ModuleContext Context(IModule module) => new(_backend, _lifetime.Token, _moduleSettings.GetValueOrDefault(module.Id));
     private readonly Dictionary<string, ModuleTile?> _moduleTiles = new();
     private PrinterStatus _lastStatus = PrinterStatus.Connecting;
     private bool _stripDue;
@@ -512,7 +518,7 @@ public partial class WebcamPopup : Window
         {
             try
             {
-                tile = module.CreateTile(info.Id, new ModuleContext(_backend, _lifetime.Token));
+                tile = module.CreateTile(info.Id, Context(module));
                 // Its own data changed: show it again, once, soon.
                 tile.Changed += () => Dispatcher.BeginInvoke(() =>
                 {

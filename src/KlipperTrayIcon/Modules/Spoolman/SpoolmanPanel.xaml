@@ -133,6 +133,9 @@
                 <DataTrigger Binding="{Binding Low}" Value="True">
                     <Setter TargetName="Grams" Property="Foreground" Value="#E3B341" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding VeryLow}" Value="True">
+                    <Setter TargetName="Grams" Property="Foreground" Value="#FF7B72" />
+                </DataTrigger>
                 <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
                     <Setter TargetName="Row" Property="Background" Value="#222222" />
                     <Setter TargetName="Weight" Property="Visibility" Value="Hidden" />

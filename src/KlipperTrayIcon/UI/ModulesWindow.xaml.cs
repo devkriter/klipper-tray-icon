@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using KlipperTrayIcon.Modules;
 
@@ -10,7 +12,8 @@ namespace KlipperTrayIcon.UI;
 
 /// <summary>
 /// Settings' list of modules: each one with its on/off on the left; the picked one's details on
-/// the right. Edits a copy of which are on: Done hands it back to Settings, which saves it.
+/// the right, with its settings. Edits a copy of which are on and of their settings: Done hands
+/// them back to Settings, which saves them.
 /// </summary>
 public partial class ModulesWindow : Window
 {
@@ -42,16 +45,24 @@ public partial class ModulesWindow : Window
 
     private readonly List<Item> _items;
     private readonly Func<IModule, string?> _problem;
+    // Modules' settings the user changed, by module id and setting id (as saved in config.json).
+    private readonly Dictionary<string, Dictionary<string, double>> _settings;
 
     /// <summary>The modules turned on when Done was clicked (registry order), or null if cancelled.</summary>
     public IReadOnlyList<string>? Result { get; private set; }
 
+    /// <summary>The modules' settings when Done was clicked: only those that differ from their defaults.</summary>
+    public Dictionary<string, Dictionary<string, double>> SettingsResult => _settings;
+
     /// <param name="enabled">The ids of the modules on now.</param>
     /// <param name="problem">Why a module can't be used with the printer in Settings, or null if it can.</param>
-    public ModulesWindow(IReadOnlyCollection<string> enabled, Func<IModule, string?> problem)
+    /// <param name="settings">Modules' settings as saved (copied: they change only with Done).</param>
+    public ModulesWindow(IReadOnlyCollection<string> enabled, Func<IModule, string?> problem,
+                         IReadOnlyDictionary<string, Dictionary<string, double>> settings)
     {
         InitializeComponent();
         _problem = problem;
+        _settings = settings.ToDictionary(p => p.Key, p => new Dictionary<string, double>(p.Value));
         _items = ModuleRegistry.All.Select(m => new Item(m, enabled.Contains(m.Id))).ToList();
         Refresh();
         ModuleList.ItemsSource = _items;
@@ -86,7 +97,54 @@ public partial class ModulesWindow : Window
         AuthorText.Visibility = If(m.Author.Length > 0);
         HelpLink.Visibility = If(m.HelpUrl != null);
         AboutPanel.Visibility = If(m.Author.Length > 0 || m.HelpUrl != null);
+        SettingsList.Children.Clear();
+        foreach (var setting in m.Settings)
+            SettingsList.Children.Add(SettingRow(m, setting));
+        SettingsPanel.Visibility = If(m.Settings.Count > 0);
     }
+
+    /// <summary>A setting's name, its number box and unit, and its hint under them.</summary>
+    private UIElement SettingRow(IModule module, ModuleSetting setting)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        var name = new TextBlock { Text = setting.Name, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        double Current() => setting.ValueIn(_settings.GetValueOrDefault(module.Id));
+        var box = new TextBox { Text = Number(Current()), Width = 90, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(box, setting.Name);
+        // A number in range is kept as it's typed; anything else goes back to the last one on leaving the box.
+        box.TextChanged += (_, _) =>
+        {
+            if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out double value)
+                || value < setting.Min || value > setting.Max)
+                return;
+            if (!_settings.TryGetValue(module.Id, out var saved))
+                _settings[module.Id] = saved = [];
+            if (value == setting.Default)
+                saved.Remove(setting.Id);
+            else
+                saved[setting.Id] = value;
+            if (saved.Count == 0)
+                _settings.Remove(module.Id);
+        };
+        box.LostFocus += (_, _) => box.Text = Number(Current());
+        Grid.SetColumn(box, 1);
+        var unit = new TextBlock { Text = setting.Unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        Grid.SetColumn(unit, 2);
+        grid.Children.Add(name);
+        grid.Children.Add(box);
+        grid.Children.Add(unit);
+        if (setting.Hint.Length == 0)
+            return grid;
+        var row = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
+        row.Children.Add(grid);
+        row.Children.Add(new TextBlock { Text = setting.Hint, Style = (Style)FindResource("Hint") });
+        return row;
+    }
+
+    private static string Number(double value) => value.ToString("0.##", CultureInfo.CurrentCulture);
 
     private void OnHelpClick(object sender, RoutedEventArgs e)
     {

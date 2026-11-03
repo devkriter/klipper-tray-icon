@@ -40,6 +40,11 @@ The print queue (`src/KlipperTrayIcon/Modules/PrintQueue/`) is a complete module
    - `CheckAsync(printer, ct)` (optional): asks the printer whether it has what the module needs.
      Return `null` if it does, or a short reason (shown in the Modules window) if not.
    - `CreatePanel(context)`: returns the module's panel.
+   - `Settings` (optional): numbers the user can change on its page in the Modules window, e.g.
+     `new ModuleSetting("low", "Low below", 100, "g", "The grams left turn amber.")` (id, label,
+     default, unit, hint). Read them with `context.Setting(setting)`; they're saved in `config.json`
+     under the module's id, so never change an id once released. A change reopens the popup, so
+     your panel and tiles always start with the current values.
 3. **Build the panel**: a UserControl that derives from `ModulePanel`. In XAML:
    ```xml
    <modules:ModulePanel x:Class="KlipperTrayIcon.Modules.YourModule.YourPanel"

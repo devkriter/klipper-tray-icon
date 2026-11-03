@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.14.0] - 2026-11-02
+### Added
+- Modules can have settings, shown on their page in the Modules window. Spoolman's are when the
+  grams left turn amber (100 g at first) and red (50 g).
+
+### Fixed
+- Spoolman: a file sliced with several filaments (OrcaSlicer) showed its raw list in the material
+  warning, and on a one-tool printer was checked against its first filament rather than the one it
+  prints with.
+
+### Changed
+- Spoolman: when the spool won't last the print, there's no warning line any more: the grams left
+  turn amber, as they do when the spool is low.
+- Spoolman: nearly empty spools' grams are red.
+
 ## [2.13.0] - 2026-11-02
 ### Added
 - *Spoolman* module (Klipper): a Filament page with the spool in the printer (what's left in grams

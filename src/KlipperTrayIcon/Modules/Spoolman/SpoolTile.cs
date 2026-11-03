@@ -7,7 +7,7 @@ using KlipperTrayIcon.Printers;
 namespace KlipperTrayIcon.Modules.Spoolman;
 
 /// <summary>The stats strip's SPOOL tile: what's left on the spool in use, and its material and percentage (amber when it's short).</summary>
-public sealed class SpoolTile(SpoolmanSource source, CancellationToken lifetime) : ModuleTile
+public sealed class SpoolTile(SpoolmanSource source, CancellationToken lifetime, Levels levels) : ModuleTile
 {
     // Asked again at most this often (Show is called about every second while the popup is open).
     private static readonly TimeSpan AskEvery = TimeSpan.FromSeconds(5);
@@ -20,7 +20,7 @@ public sealed class SpoolTile(SpoolmanSource source, CancellationToken lifetime)
     {
         if (!_asking && (!_sinceAsked.IsRunning || _sinceAsked.Elapsed >= AskEvery))
             _ = AskAsync(status.Filename);
-        return Spools.Tile(_state, status);
+        return Spools.Tile(_state, status, levels);
     }
 
     private async Task AskAsync(string filename)

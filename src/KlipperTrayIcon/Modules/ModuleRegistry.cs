@@ -20,6 +20,10 @@ public static class ModuleRegistry
     public static IReadOnlyList<IModule> Enabled(AppConfig config, IPrinterBackend printer) =>
         All.Where(m => config.Modules.Contains(m.Id) && m.Supports(printer)).ToList();
 
+    /// <summary>A module's saved settings (see <see cref="IModule.Settings"/>), or null if none were changed.</summary>
+    public static IReadOnlyDictionary<string, double>? SavedSettings(AppConfig config, IModule module) =>
+        config.ModuleSettings.GetValueOrDefault(module.Id);
+
     /// <summary>How a module's tile is saved in stats_tiles: "print_queue:queue".</summary>
     public static string TileKey(IModule module, TileInfo tile) => $"{module.Id}:{tile.Id}";
 

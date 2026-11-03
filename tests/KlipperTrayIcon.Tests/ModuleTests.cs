@@ -57,6 +57,35 @@ public class ModuleTests
     }
 
     [Fact]
+    public void ModuleSettingsAreSavedAndReadBack()
+    {
+        foreach (var module in ModuleRegistry.All)
+        {
+            Assert.Equal(module.Settings.Count, module.Settings.Select(s => s.Id).Distinct().Count());
+            foreach (var setting in module.Settings)
+            {
+                Assert.Matches("^[a-z0-9_]+$", setting.Id);
+                Assert.InRange(setting.Default, setting.Min, setting.Max);
+            }
+        }
+
+        var low = new ModuleSetting("low", "Low below", 100, "g", Max: 1000);
+        var context = new ModuleContext(new MoonrakerBackend("http://p"), default);
+        Assert.Equal(100, context.Setting(low));
+        Assert.Equal(80, (context with { Saved = new Dictionary<string, double> { ["low"] = 80 } }).Setting(low));
+        Assert.Equal(1000, low.ValueIn(new Dictionary<string, double> { ["low"] = 5000 }));
+        Assert.Equal(100, low.ValueIn(new Dictionary<string, double> { ["other"] = 5 }));
+
+        // In config.json by module id, then setting id; kept through a save.
+        var config = JsonSerializer.Deserialize<AppConfig>("""{"module_settings":{"spoolman":{"low":150}}}""", ConfigStore.JsonOptions)!;
+        Assert.Equal(150, config.ModuleSettings["spoolman"]["low"]);
+        Assert.Equal(150, config.Clone().ModuleSettings["spoolman"]["low"]);
+        var spoolman = ModuleRegistry.All.Single(m => m.Id == "spoolman");
+        Assert.Equal(150, spoolman.Settings.Single(s => s.Id == "low").ValueIn(ModuleRegistry.SavedSettings(config, spoolman)));
+        Assert.Null(ModuleRegistry.SavedSettings(new AppConfig(), spoolman));
+    }
+
+    [Fact]
     public void TheQueueTile()
     {
         Assert.Equal(new StatusText.Tile("—", ""), QueueTile.Describe(null));

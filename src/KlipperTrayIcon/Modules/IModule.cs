@@ -39,6 +39,12 @@ public interface IModule
     string Author => "";
 
     /// <summary>
+    /// Numbers the user can change on its page in the Modules window, e.g. a threshold. Read them with
+    /// <see cref="ModuleContext.Setting"/>. None by default.
+    /// </summary>
+    IReadOnlyList<ModuleSetting> Settings => [];
+
+    /// <summary>
     /// Whether it can work with this kind of printer at all, e.g. <c>printer is IMoonrakerApi</c> for
     /// Klipper only. No network calls: Settings greys the module out when this is false.
     /// </summary>
@@ -86,10 +92,30 @@ public abstract class ModuleTile
     internal event Action? Changed;
 }
 
+/// <summary>A number the user can set for a module, on its page in the Modules window.</summary>
+/// <param name="Id">Unique within the module, e.g. "low". Saved in config.json under the module's id, so never change it once released.</param>
+/// <param name="Name">Its label, e.g. "Low below".</param>
+/// <param name="Default">Its value until the user changes it.</param>
+/// <param name="Unit">Shown after the box, e.g. "g". Empty: none.</param>
+/// <param name="Hint">A line under it on what it changes. Empty: none.</param>
+public sealed record ModuleSetting(string Id, string Name, double Default, string Unit = "", string Hint = "",
+                                   double Min = 0, double Max = 100_000)
+{
+    /// <summary>The saved value (kept between Min and Max), or the default if there's none.</summary>
+    public double ValueIn(IReadOnlyDictionary<string, double>? saved) =>
+        saved != null && saved.TryGetValue(Id, out double value) && double.IsFinite(value) ? Math.Clamp(value, Min, Max) : Default;
+}
+
 /// <summary>What a module's panel gets to work with.</summary>
 /// <param name="Printer">The printer. Klipper printers are also an <see cref="IMoonrakerApi"/>.</param>
 /// <param name="Lifetime">Cancelled when the popup goes away (settings changed, app exiting): stop any loops then.</param>
-public sealed record ModuleContext(IPrinterBackend Printer, CancellationToken Lifetime);
+/// <param name="Saved">The module's settings as saved, by id; read them with <see cref="Setting"/>.</param>
+public sealed record ModuleContext(IPrinterBackend Printer, CancellationToken Lifetime,
+                                   IReadOnlyDictionary<string, double>? Saved = null)
+{
+    /// <summary>One of the module's <see cref="IModule.Settings"/>: the user's value, or its default.</summary>
+    public double Setting(ModuleSetting setting) => setting.ValueIn(Saved);
+}
 
 /// <summary>
 /// A module's view: the popup's side panel under the stats strip, in place of the console while its

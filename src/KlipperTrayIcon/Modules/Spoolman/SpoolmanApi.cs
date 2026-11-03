@@ -218,8 +218,31 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
             meta.Opt("filament_weight_total") is > 0 and var total ? total : null,
             weights.ValueKind == JsonValueKind.Array
                 ? weights.EnumerateArray().Select(w => w.ValueKind == JsonValueKind.Number ? w.GetDouble() : 0).ToList() : [],
-            // "PLA;PLA;PETG" for several tools.
-            meta.Str("filament_type").Split(';', StringSplitOptions.TrimEntries).Where(t => t.Length > 0).ToList());
+            ReadTypes(meta.Prop("filament_type")));
+    }
+
+    /// <summary>
+    /// The file's materials, one per filament slot: "PLA;PLA;PETG", or (OrcaSlicer, through newer
+    /// Moonraker) a JSON list in a string, '["ASA", "ASA", "ABS"]'.
+    /// </summary>
+    static List<string> ReadTypes(JsonElement types)
+    {
+        if (types.ValueKind == JsonValueKind.String && types.GetString()!.TrimStart().StartsWith('['))
+        {
+            try
+            {
+                using var list = JsonDocument.Parse(types.GetString()!);
+                return ReadTypes(list.RootElement);
+            }
+            catch (JsonException) { }
+        }
+        var names = types.ValueKind switch
+        {
+            JsonValueKind.Array => types.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : ""),
+            JsonValueKind.String => types.GetString()!.Split(';'),
+            _ => []
+        };
+        return names.Select(t => t.Trim(' ', '"', '[', ']')).Where(t => t.Length > 0).ToList();
     }
 
     /// <summary>Spoolman's own page (from moonraker.conf's [spoolman] server), or null.</summary>

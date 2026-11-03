@@ -36,11 +36,16 @@ public sealed record SpoolCheck(double? Needed, string? WrongMaterial)
     public static SpoolCheck None { get; } = new(null, null);
 }
 
+/// <summary>When the grams left turn amber (under Low) and red (under Empty); set in the Modules window.</summary>
+public sealed record Levels(double Low, double Empty)
+{
+    public static Levels Default { get; } = new(SpoolmanModule.Low.Default, SpoolmanModule.Empty.Default);
+
+    public static Levels From(ModuleContext context) => new(context.Setting(SpoolmanModule.Low), context.Setting(SpoolmanModule.Empty));
+}
+
 public static class Spools
 {
-    /// <summary>Under this many grams a spool is shown in amber.</summary>
-    public const double LowGrams = 100;
-
     /// <summary>
     /// What the print still needs from the spool in this tool (tool: its index, -1 on a printer without
     /// tool macros), from the slicer's weights × the part still to print. Per tool when the file has
@@ -57,13 +62,25 @@ public static class Spools
             ? (tool >= 0 && tool < file.Weights.Count ? file.Weights[tool] : null)
             : inUse ? file.TotalWeight ?? (file.Weights.Count > 0 ? file.Weights.Sum() : null) : null;
         double? needed = weight is > 0 ? weight * (1 - Math.Clamp(status.Progress, 0, 1)) : null;
-        string? type = state.MultiTool && file.Types.Count > 1
-            ? (tool >= 0 && tool < file.Types.Count ? file.Types[tool] : null)
-            : inUse ? file.Types.FirstOrDefault() : null;
-        // A tool this print doesn't use: neither applies.
-        if (state.MultiTool && file.Weights.Count > 1 && weight is not > 0)
-            type = null;
-        string? wrong = type != null && spool.Material.Length > 0 && !SameMaterial(type, spool.Material) ? type : null;
+        string? wrong;
+        if (state.MultiTool && file.Types.Count > 1)
+        {
+            string? type = tool >= 0 && tool < file.Types.Count ? file.Types[tool] : null;
+            // A tool this print doesn't use: neither applies.
+            if (file.Weights.Count > 1 && weight is not > 0)
+                type = null;
+            wrong = type != null && spool.Material.Length > 0 && !SameMaterial(type, spool.Material) ? type : null;
+        }
+        else
+        {
+            // One tool: the file may still list several filament slots. Only the slots the print
+            // uses count (all of them if it has no weights per slot), and any of them matching is fine.
+            bool perSlot = file.Weights.Count == file.Types.Count && file.Weights.Any(w => w > 0);
+            var used = file.Types.Where((_, i) => !perSlot || file.Weights[i] > 0)
+                                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            wrong = inUse && used.Count > 0 && spool.Material.Length > 0 && !used.Any(t => SameMaterial(t, spool.Material))
+                ? string.Join(" or ", used) : null;
+        }
         return new SpoolCheck(needed, wrong);
     }
 
@@ -88,7 +105,7 @@ public static class Spools
     private static double Round(double value) => Math.Round(Math.Max(value, 0), MidpointRounding.AwayFromZero);
 
     /// <summary>The SPOOL tile: what's left on the spool in use, and its material and percentage, or how short it is.</summary>
-    public static StatusText.Tile Tile(SpoolmanState? state, PrinterStatus status)
+    public static StatusText.Tile Tile(SpoolmanState? state, PrinterStatus status, Levels levels)
     {
         if (state == null)
             return new("—", "");
@@ -101,7 +118,7 @@ public static class Spools
         if (check.WrongMaterial != null)
             return new(value, $"sliced for {check.WrongMaterial}", Highlight: true);
         string detail = string.Join(" · ", new[] { spool.Material, spool.Fraction is double f ? Percent(f) : "" }.Where(s => s.Length > 0));
-        return new(value, detail, Highlight: spool.Remaining is < LowGrams);
+        return new(value, detail, Highlight: spool.Remaining < levels.Low);
     }
 
     /// <summary>"used yesterday", "used 2 weeks ago"; "not used yet".</summary>

@@ -84,7 +84,7 @@ public partial class SpoolmanPanel : ModulePanel
     public override void OnStatus(PrinterStatus status)
     {
         bool printingChanged = (status.State is "printing" or "paused") != (_status.State is "printing" or "paused");
-        bool redraw = printingChanged || status.Progress != _status.Progress || status.Filename != _status.Filename;
+        bool redraw = printingChanged || status.State != _status.State || status.Progress != _status.Progress || status.Filename != _status.Filename;
         _status = status;
         _filename = status.Filename;
         if (printingChanged)
@@ -565,8 +565,9 @@ public partial class SpoolmanPanel : ModulePanel
             : own ? $"{chosen} only works on the toolhead in use. Add {{tool}} to it in the module's settings to pick one."
             : _macros.Macros.Contains(name) ? $"{name} only works on the toolhead in use"
             : $"The printer has no {name} macro. Pick another one in the module's settings.";
-        if (_status.State is "printing" or "paused")
-            why = "Not while printing";
+        // Paused is fine: that's when a print's filament is changed.
+        if (_status.State == "printing")
+            why = "Not while printing. Pause the print first";
         return (tool, inUse, script, why);
     }
 

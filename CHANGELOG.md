@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [2.15.0] - 2026-11-04
 ### Added
 - Spoolman: *Load* and *Unload* at the top right of the Filament page run the printer's
-  `LOAD_FILAMENT` and `UNLOAD_FILAMENT` macros after a second click, and are off while printing.
+  `LOAD_FILAMENT` and `UNLOAD_FILAMENT` macros after a second click. They work while idle or
+  paused (to change filament mid-print), not while printing.
   *Unload* also takes the spool out in Spoolman, so you pick the next one with *Use* and then
   *Load* it. On printers with several toolheads they act on the toolhead picked, with its own
   `LOAD_FILAMENT_T1` macro, or with the plain macro's `TOOL`, `T` or `EXTRUDER` parameter if it

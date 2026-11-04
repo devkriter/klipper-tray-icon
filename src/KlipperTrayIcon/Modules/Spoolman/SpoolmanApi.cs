@@ -392,7 +392,7 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
         (string? error, string? message) = (null, null);
         if (mark != null || refused)
         {
-            try { (error, message) = Said(await ConsoleAsync(100, ct), mark); }
+            try { (error, message) = Said(await ConsoleAsync(1000, ct), mark); }
             catch (Exception) when (!ct.IsCancellationRequested) { }
         }
         if (refused || error != null)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- An *E-Stop* button over the top-right corner of the webcam view (Klipper printers). It shows
+  only while the mouse is over the video. The first click arms it ("Click again to E-Stop", in
+  red); a second click within 3 seconds sends Moonraker's emergency stop
+  (`/printer/emergency_stop`), which gets through even while the printer is busy. Leaving the
+  video disarms it.
+
 ## [2.15.0] - 2026-11-04
 ### Added
 - Spoolman: *Load* and *Unload* at the top right of the Filament page run the printer's

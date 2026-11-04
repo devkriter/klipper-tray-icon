@@ -233,6 +233,12 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
     public Task RestartKlipperAsync(CancellationToken ct) =>
         SendAsync(HttpMethod.Post, "/printer/firmware_restart", null, ct);
 
+    public bool SupportsEmergencyStop => true;
+
+    // Moonraker's own call rather than M112 as a script: it gets through even while the G-code queue is busy.
+    public Task EmergencyStopAsync(CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/printer/emergency_stop", null, ct);
+
     private PrintDetails ReadDetails(JsonElement status, string state, GcodeFileInfo file)
     {
         // Read the extruder asked for this time; ask for the one now in use next time.

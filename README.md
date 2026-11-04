@@ -45,7 +45,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
   including time elapsed, any of the printer's other temperature sensors, and tiles from modules
   that are on. The strip and the console can each be turned off in Settings. If Klipper shuts
-  down, the console says why, with *Click to restart* under it.
+  down, the console says why, with *Click to restart* under it. While the mouse is over the video,
+  an *E-Stop* button shows in its top-right corner; it stops the printer on a second click.
 - **Notifications** when a print finishes, fails, is cancelled or pauses.
 - **Quiet updates**: once a day the app checks GitHub for a new release. Nothing pops up: an
   *Update to vX* item appears in the tray menu (and *Update now* in Settings), and one click

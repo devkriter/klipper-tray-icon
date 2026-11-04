@@ -36,8 +36,10 @@ The icon updates dynamically to show a circular progress bar corresponding to th
     print and the material the file was sliced for. Printers with several toolheads (T0, T1, …
     macros with a `spool_id`, as Mainsail and Fluidd use them) get a card per toolhead. Below are
     your other spools, most recently used first, with a filter; hover one for its details, *Use*
-    to switch (a second click while printing). Its *SPOOL* tile shows what's left on the spool in
-    use, in amber when it's low or short for the print.
+    to switch (a second click while printing). *Load* and *Unload* run the printer's
+    `LOAD_FILAMENT` and `UNLOAD_FILAMENT` macros (or the ones you pick in the module's settings)
+    after a second click, and *Unload* takes the spool out in Spoolman. Its *SPOOL* tile shows
+    what's left on the spool in use, in amber when it's low or short for the print.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,

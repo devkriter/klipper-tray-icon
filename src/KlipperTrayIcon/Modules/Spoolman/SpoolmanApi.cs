@@ -72,6 +72,53 @@ public sealed record FileFilament(double? TotalWeight, IReadOnlyList<double> Wei
     public static FileFilament None { get; } = new(null, [], []);
 }
 
+/// <summary>
+/// The printer's macros that load and unload filament: LOAD_FILAMENT and UNLOAD_FILAMENT (as Mainsail,
+/// Fluidd and KlipperScreen call them), per tool LOAD_FILAMENT_T1, and the tool parameter the plain
+/// ones read, if any (TOOL, T or EXTRUDER). Macros are upper case.
+/// </summary>
+public sealed record FilamentMacros(IReadOnlySet<string> Macros, string? LoadParameter = null, string? UnloadParameter = null)
+{
+    public static FilamentMacros None { get; } = new(new HashSet<string>());
+
+    public static string Name(bool load) => load ? "LOAD_FILAMENT" : "UNLOAD_FILAMENT";
+
+    /// <summary>
+    /// The G-code that loads (or unloads) a toolhead (its number; -1 on a printer with one), or null if
+    /// the printer has no macro for it. A plain macro that takes no tool only works on the tool in use.
+    /// Chosen: the user's own command instead (the module's setting), run as it is with {tool} as the
+    /// toolhead's number; without {tool}, it too only works on the tool in use.
+    /// </summary>
+    public string? Script(bool load, int tool, bool inUse, string? chosen = null)
+    {
+        string name = Name(load);
+        if (chosen != null && chosen.Length > 0 && !chosen.Equals(name, StringComparison.OrdinalIgnoreCase))
+            return chosen.Contains("{tool}", StringComparison.Ordinal)
+                ? chosen.Replace("{tool}", Math.Max(tool, 0).ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                : tool < 0 || inUse ? chosen : null;
+        if (tool < 0)
+            return Macros.Contains(name) ? name : null;
+        if (Macros.Contains($"{name}_T{tool}"))
+            return $"{name}_T{tool}";
+        if (!Macros.Contains(name))
+            return null;
+        return (load ? LoadParameter : UnloadParameter) switch
+        {
+            "EXTRUDER" => $"{name} EXTRUDER={(tool == 0 ? "extruder" : $"extruder{tool}")}",
+            string parameter => $"{name} {parameter}={tool}",
+            null => inUse ? name : null,
+        };
+    }
+
+    /// <summary>The tool parameter a macro's G-code reads ("TOOL", "T" or "EXTRUDER"), or null.</summary>
+    internal static string? ToolParameter(string gcode) =>
+        new[] { "TOOL", "T", "EXTRUDER" }.FirstOrDefault(p =>
+            Regex.IsMatch(gcode, $@"params\s*(\.\s*{p}\b|\[\s*['""]{p}['""]\s*\])"));
+}
+
+/// <summary>The printer said no to G-code, with Klipper's message ("Extrude below minimum temp").</summary>
+public sealed class GcodeException(string message) : Exception(message);
+
 /// <summary>Spoolman said no (through Moonraker's proxy), or isn't answering. StatusCode is Spoolman's, e.g. 404.</summary>
 public sealed class SpoolmanException(string message, int statusCode = 0) : Exception(message)
 {
@@ -89,7 +136,8 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     private static readonly Regex ToolMacro = new(@"^gcode_macro (T(\d+))$", RegexOptions.IgnoreCase);
 
     // The printer's T0…Tn macros and extruders, looked up once (they change only with Klipper's config).
-    private (List<(string Macro, string Tool, int Number)> Macros, HashSet<string> Extruders)? _objects;
+    private (List<(string Macro, string Tool, int Number)> Macros, HashSet<string> Extruders, HashSet<string> All)? _objects;
+    private FilamentMacros? _filamentMacros;
     private string? _fileFor;
     private FileFilament? _file;
     private string? _currency;
@@ -151,6 +199,18 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     /// <summary>The toolheads with a spool_id variable on their T0…Tn macro, and which one is in use.</summary>
     public async Task<ToolSpools> GetToolsAsync(CancellationToken ct)
     {
+        var (macros, extruders, _) = await ObjectsAsync(ct);
+        if (macros.Count == 0)
+            return ToolSpools.None;
+        using var doc = await printer.GetJsonAsync(
+            "/printer/objects/query?toolhead=extruder" + string.Concat(macros.Select(m => $"&{Uri.EscapeDataString(m.Macro)}=spool_id")),
+            ct, TimeSpan.FromSeconds(3));
+        return ReadTools(doc.RootElement.Prop("result").Prop("status"), macros, extruders);
+    }
+
+    private async Task<(List<(string Macro, string Tool, int Number)> Macros, HashSet<string> Extruders, HashSet<string> All)> ObjectsAsync(
+        CancellationToken ct)
+    {
         if (_objects == null)
         {
             using var list = await printer.GetJsonAsync("/printer/objects/list", ct, TimeSpan.FromSeconds(3));
@@ -161,15 +221,53 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
                              .Select(m => (m.Value, m.Groups[1].Value.ToUpperInvariant(), int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture)))
                              .OrderBy(m => m.Item3)
                              .ToList(),
-                        names.Where(n => n.StartsWith("extruder", StringComparison.Ordinal) && !n.Contains(' ')).ToHashSet());
+                        names.Where(n => n.StartsWith("extruder", StringComparison.Ordinal) && !n.Contains(' ')).ToHashSet(),
+                        names.ToHashSet());
         }
-        var (macros, extruders) = _objects.Value;
-        if (macros.Count == 0)
-            return ToolSpools.None;
-        using var doc = await printer.GetJsonAsync(
-            "/printer/objects/query?toolhead=extruder" + string.Concat(macros.Select(m => $"&{Uri.EscapeDataString(m.Macro)}=spool_id")),
-            ct, TimeSpan.FromSeconds(3));
-        return ReadTools(doc.RootElement.Prop("result").Prop("status"), macros, extruders);
+        return _objects.Value;
+    }
+
+    /// <summary>
+    /// The printer's macros, upper case, for the module's settings: the ones about filament first,
+    /// then the rest by name. Hidden ones (_NAME, as Mainsail hides them) are left out.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetMacrosAsync(CancellationToken ct) =>
+        MacroChoices((await ObjectsAsync(ct)).All);
+
+    internal static List<string> MacroChoices(IEnumerable<string> objects) =>
+        objects.Where(n => n.StartsWith("gcode_macro ", StringComparison.OrdinalIgnoreCase))
+               .Select(n => n["gcode_macro ".Length..].Trim().ToUpperInvariant())
+               .Where(n => n.Length > 0 && !n.StartsWith('_'))
+               .Distinct()
+               .OrderBy(n => n.Contains("FILAMENT", StringComparison.Ordinal) || n.Contains("LOAD", StringComparison.Ordinal) ? 0 : 1)
+               .ThenBy(n => n, StringComparer.Ordinal)
+               .ToList();
+
+    /// <summary>
+    /// The printer's load and unload macros. On a printer with several tools, the plain ones' G-code
+    /// (from Klipper's config) says whether they take a tool. Looked up once.
+    /// </summary>
+    public async Task<FilamentMacros> GetFilamentMacrosAsync(CancellationToken ct)
+    {
+        if (_filamentMacros != null)
+            return _filamentMacros;
+        var (tools, _, all) = await ObjectsAsync(ct);
+        var macros = all.Where(n => n.StartsWith("gcode_macro ", StringComparison.OrdinalIgnoreCase))
+                        .Select(n => n["gcode_macro ".Length..].Trim().ToUpperInvariant())
+                        .Where(n => n.Contains("LOAD_FILAMENT", StringComparison.Ordinal))
+                        .ToHashSet();
+        var found = new FilamentMacros(macros);
+        if (tools.Count > 1 && (macros.Contains("LOAD_FILAMENT") || macros.Contains("UNLOAD_FILAMENT")))
+        {
+            using var doc = await printer.GetJsonAsync("/printer/objects/query?configfile=settings", ct, TimeSpan.FromSeconds(5));
+            var settings = doc.RootElement.Prop("result").Prop("status").Prop("configfile").Prop("settings");
+            found = found with
+            {
+                LoadParameter = FilamentMacros.ToolParameter(settings.Prop("gcode_macro load_filament").Str("gcode")),
+                UnloadParameter = FilamentMacros.ToolParameter(settings.Prop("gcode_macro unload_filament").Str("gcode")),
+            };
+        }
+        return _filamentMacros = found;
     }
 
     /// <summary>
@@ -259,16 +357,48 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
         printer.SendAsync(HttpMethod.Post, "/server/spoolman/spool_id", new { spool_id = id }, ct);
 
     /// <summary>
-    /// Puts a spool in a tool: its macro's spool_id variable, as Mainsail and Fluidd set it, and Moonraker's
-    /// active spool too if the tool is the one in use.
+    /// Puts a spool in a tool (null: takes it out): its macro's spool_id variable, as Mainsail and Fluidd
+    /// set it, and Moonraker's active spool too if the tool is the one in use.
     /// </summary>
-    public async Task SetToolSpoolAsync(string tool, int id, bool active, CancellationToken ct)
+    public async Task SetToolSpoolAsync(string tool, int? id, bool active, CancellationToken ct)
     {
-        string script = $"SET_GCODE_VARIABLE MACRO={tool} VARIABLE=spool_id VALUE={id}";
+        string value = id is int n ? n.ToString(CultureInfo.InvariantCulture) : "None";
+        string script = $"SET_GCODE_VARIABLE MACRO={tool} VARIABLE=spool_id VALUE={value}";
         await printer.SendAsync(HttpMethod.Post, "/printer/gcode/script?script=" + Uri.EscapeDataString(script), null, ct);
         if (active)
             await SetActiveSpoolAsync(id, ct);
     }
+
+    /// <summary>
+    /// Runs G-code (a load or unload macro) and waits until it's done: heating can take minutes. Throws
+    /// <see cref="GcodeException"/> with Klipper's message if it fails.
+    /// </summary>
+    public async Task RunGcodeAsync(string script, CancellationToken ct)
+    {
+        try
+        {
+            using var _ = await printer.PostJsonAsync("/printer/gcode/script?script=" + Uri.EscapeDataString(script), null, ct,
+                                                      TimeSpan.FromMinutes(10));
+        }
+        catch (MoonrakerHttpException e) when ((int)e.StatusCode == 400)
+        {
+            // The answer's body isn't passed on; Klipper's error is the last "!!" line in the console.
+            string message = "";
+            try
+            {
+                using var store = await printer.GetJsonAsync("/server/gcode_store?count=20", ct, TimeSpan.FromSeconds(3));
+                message = LastError(store.RootElement.Prop("result").Prop("gcode_store"));
+            }
+            catch (Exception) when (!ct.IsCancellationRequested) { }
+            throw new GcodeException(message.Length > 0 ? message : $"{script} failed");
+        }
+    }
+
+    /// <summary>The last error in the console, its first line ("!! Must home axis first" → "Must home axis first"), or "".</summary>
+    internal static string LastError(JsonElement store) =>
+        store.ValueKind != JsonValueKind.Array ? ""
+        : store.EnumerateArray().Select(e => e.Str("message").Trim())
+               .LastOrDefault(m => m.StartsWith("!!", StringComparison.Ordinal))?.TrimStart('!', ' ').Split('\n')[0].Trim() ?? "";
 
     /// <summary>A request to Spoolman through Moonraker. Throws <see cref="SpoolmanException"/> if Spoolman says no.</summary>
     private async Task<JsonDocument> ProxyAsync(string method, string path, string query, CancellationToken ct)

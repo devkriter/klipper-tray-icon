@@ -20,6 +20,9 @@ public sealed class SpoolTile(SpoolmanSource source, CancellationToken lifetime,
     {
         if (!_asking && (!_sinceAsked.IsRunning || _sinceAsked.Elapsed >= AskEvery))
             _ = AskAsync(status.Filename);
+        // The panel fetched since (after a switch, load or unload): its state, now rather than at the next ask.
+        if (_state != null && source.State is { } latest)
+            _state = latest;
         return Spools.Tile(_state, status, levels);
     }
 

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using KlipperTrayIcon.Modules;
 
 namespace KlipperTrayIcon.UI;
@@ -47,6 +48,8 @@ public partial class ModulesWindow : Window
     private readonly Func<IModule, string?> _problem;
     // Modules' settings the user changed, by module id and setting id (as saved in config.json).
     private readonly Dictionary<string, Dictionary<string, double>> _settings;
+    private readonly Dictionary<string, Dictionary<string, string>> _textSettings;
+    private readonly Func<IModule, ModuleSetting, IReadOnlyList<string>> _choices;
 
     /// <summary>The modules turned on when Done was clicked (registry order), or null if cancelled.</summary>
     public IReadOnlyList<string>? Result { get; private set; }
@@ -54,15 +57,25 @@ public partial class ModulesWindow : Window
     /// <summary>The modules' settings when Done was clicked: only those that differ from their defaults.</summary>
     public Dictionary<string, Dictionary<string, double>> SettingsResult => _settings;
 
+    /// <summary>The modules' text settings when Done was clicked, the same way.</summary>
+    public Dictionary<string, Dictionary<string, string>> TextSettingsResult => _textSettings;
+
     /// <param name="enabled">The ids of the modules on now.</param>
     /// <param name="problem">Why a module can't be used with the printer in Settings, or null if it can.</param>
     /// <param name="settings">Modules' settings as saved (copied: they change only with Done).</param>
+    /// <param name="textSettings">Modules' text settings as saved (copied too).</param>
+    /// <param name="choices">A text setting's choices from the printer (<see cref="IModule.ChoicesAsync"/>); empty if none.</param>
     public ModulesWindow(IReadOnlyCollection<string> enabled, Func<IModule, string?> problem,
-                         IReadOnlyDictionary<string, Dictionary<string, double>> settings)
+                         IReadOnlyDictionary<string, Dictionary<string, double>> settings,
+                         IReadOnlyDictionary<string, Dictionary<string, string>>? textSettings = null,
+                         Func<IModule, ModuleSetting, IReadOnlyList<string>>? choices = null)
     {
         InitializeComponent();
         _problem = problem;
+        _choices = choices ?? ((_, _) => []);
         _settings = settings.ToDictionary(p => p.Key, p => new Dictionary<string, double>(p.Value));
+        _textSettings = (textSettings ?? new Dictionary<string, Dictionary<string, string>>())
+            .ToDictionary(p => p.Key, p => new Dictionary<string, string>(p.Value));
         _items = ModuleRegistry.All.Select(m => new Item(m, enabled.Contains(m.Id))).ToList();
         Refresh();
         ModuleList.ItemsSource = _items;
@@ -99,7 +112,7 @@ public partial class ModulesWindow : Window
         AboutPanel.Visibility = If(m.Author.Length > 0 || m.HelpUrl != null);
         SettingsList.Children.Clear();
         foreach (var setting in m.Settings)
-            SettingsList.Children.Add(SettingRow(m, setting));
+            SettingsList.Children.Add(setting.IsText ? TextRow(m, setting) : SettingRow(m, setting));
         SettingsPanel.Visibility = If(m.Settings.Count > 0);
     }
 
@@ -136,6 +149,67 @@ public partial class ModulesWindow : Window
         grid.Children.Add(name);
         grid.Children.Add(box);
         grid.Children.Add(unit);
+        return WithHint(grid, setting);
+    }
+
+    /// <summary>
+    /// A text setting's name and its box (emptied: back to the default on leaving it), and its hint. With
+    /// choices from the printer, the box is a dropdown of them that still takes anything typed.
+    /// </summary>
+    private UIElement TextRow(IModule module, ModuleSetting setting)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        var name = new TextBlock { Text = setting.Name, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        string Current() => setting.TextIn(_textSettings.GetValueOrDefault(module.Id));
+        var choices = _choices(module, setting);
+        Control box = choices.Count > 0
+            ? new ComboBox { IsEditable = true, ItemsSource = choices, Text = Current(), MaxDropDownHeight = 260 }
+            : new TextBox { Text = Current() };
+        box.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(box, setting.Name);
+        string Typed() => box is ComboBox combo ? combo.Text : ((TextBox)box).Text;
+        void Keep(string typed)
+        {
+            string value = typed.Trim();
+            if (!_textSettings.TryGetValue(module.Id, out var saved))
+                _textSettings[module.Id] = saved = [];
+            if (value.Length == 0 || value == setting.Text)
+                saved.Remove(setting.Id);
+            else
+                saved[setting.Id] = value;
+            if (saved.Count == 0)
+                _textSettings.Remove(module.Id);
+        }
+        void Show(string text)
+        {
+            if (box is ComboBox combo)
+                combo.Text = text;
+            else
+                ((TextBox)box).Text = text;
+        }
+        box.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) => Keep(Typed())));
+        if (box is ComboBox dropdown)
+            dropdown.SelectionChanged += (_, _) =>
+            {
+                if (dropdown.SelectedItem is string picked)
+                    Keep(picked);
+            };
+        // Emptied: the default again, once the box is left.
+        box.LostKeyboardFocus += (_, _) =>
+        {
+            if (!box.IsKeyboardFocusWithin && box is not ComboBox { IsDropDownOpen: true })
+                Show(Current());
+        };
+        Grid.SetColumn(box, 1);
+        grid.Children.Add(name);
+        grid.Children.Add(box);
+        return WithHint(grid, setting);
+    }
+
+    private UIElement WithHint(Grid grid, ModuleSetting setting)
+    {
         if (setting.Hint.Length == 0)
             return grid;
         var row = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };

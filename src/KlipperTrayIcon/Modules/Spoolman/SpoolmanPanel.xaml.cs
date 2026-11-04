@@ -38,6 +38,8 @@ public partial class SpoolmanPanel : ModulePanel
     private readonly CancellationToken _lifetime;
     private readonly Levels _levels;
     private volatile bool _wake = true, _listWake = true;
+    // After a change of ours: fetched again, not the tile's answer from a moment ago.
+    private volatile bool _fresh;
     private PrinterStatus _status = PrinterStatus.Connecting;
     private volatile string _filename = "";
     private SpoolmanState? _state;
@@ -50,6 +52,10 @@ public partial class SpoolmanPanel : ModulePanel
     // The toolhead Use puts a spool in, on a printer with several (its index; -1: the one in use).
     private int _target = -1;
     private bool _switching;
+    // Load and Unload: the printer's macros, the one waiting for its second click, and the one running.
+    private FilamentMacros _macros = FilamentMacros.None;
+    private readonly string _loadMacro, _unloadMacro; // the module's settings
+    private bool? _actionArmed, _acting;
 
     public SpoolmanPanel(SpoolmanSource source, ModuleContext context)
     {
@@ -58,6 +64,7 @@ public partial class SpoolmanPanel : ModulePanel
         _printer = context.Printer;
         _lifetime = context.Lifetime;
         _levels = Levels.From(context);
+        (_loadMacro, _unloadMacro) = (context.Text(SpoolmanModule.LoadMacro), context.Text(SpoolmanModule.UnloadMacro));
         SpoolList.ItemsSource = _rows;
         _disarm.Tick += (_, _) => Disarm();
         ShowCards();
@@ -81,7 +88,12 @@ public partial class SpoolmanPanel : ModulePanel
         _status = status;
         _filename = status.Filename;
         if (printingChanged)
+        {
             Disarm();
+            // Load and Unload's last word is old news once a print starts.
+            if (_acting == null)
+                ActionNote.Visibility = Visibility.Collapsed;
+        }
         if (redraw && _state != null && IsVisible)
             ShowCards();
     }
@@ -92,7 +104,7 @@ public partial class SpoolmanPanel : ModulePanel
     {
         var sinceState = Stopwatch.StartNew();
         var sinceList = Stopwatch.StartNew();
-        bool askedUrl = false, listKnown = false;
+        bool askedUrl = false, listKnown = false, macrosKnown = false;
         while (!ct.IsCancellationRequested)
         {
             bool showing = await Dispatcher.InvokeAsync(() => IsVisible);
@@ -101,12 +113,14 @@ public partial class SpoolmanPanel : ModulePanel
                 try { await Task.Delay(200, ct).ConfigureAwait(false); } catch (OperationCanceledException) { break; }
                 continue;
             }
-            _wake = false;
+            bool fresh = _fresh;
+            (_wake, _fresh) = (false, false);
             sinceState.Restart();
             try
             {
                 // The tile may have just asked: then this is its answer.
-                var state = await _source.GetAsync(_filename, StateRefresh - TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+                var state = await _source.GetAsync(_filename, fresh ? TimeSpan.Zero : StateRefresh - TimeSpan.FromSeconds(1), ct)
+                    .ConfigureAwait(false);
                 IReadOnlyList<Spool>? spools = null;
                 string? currency = null;
                 // The list when the page is opened, then now and then; until it has come once, every time.
@@ -128,7 +142,13 @@ public partial class SpoolmanPanel : ModulePanel
                     catch (Exception) when (!ct.IsCancellationRequested) { } // no link, then
                     askedUrl = true;
                 }
-                await Dispatcher.InvokeAsync(() => Show(state, spools, currency, url));
+                FilamentMacros? macros = null;
+                if (!macrosKnown)
+                {
+                    try { (macros, macrosKnown) = (await _source.Api.GetFilamentMacrosAsync(ct).ConfigureAwait(false), true); }
+                    catch (Exception) when (!ct.IsCancellationRequested) { } // asked again next time
+                }
+                await Dispatcher.InvokeAsync(() => Show(state, spools, currency, url, macros));
             }
             catch (OperationCanceledException) { break; }
             catch (Exception e)
@@ -139,9 +159,11 @@ public partial class SpoolmanPanel : ModulePanel
         }
     }
 
-    private void Show(SpoolmanState state, IReadOnlyList<Spool>? spools, string? currency, string? url)
+    private void Show(SpoolmanState state, IReadOnlyList<Spool>? spools, string? currency, string? url, FilamentMacros? macros)
     {
         (_state, _error) = (state, null);
+        if (macros != null)
+            _macros = macros;
         if (spools != null)
             (_spools, _currency) = (spools, currency);
         if (url != null)
@@ -165,6 +187,7 @@ public partial class SpoolmanPanel : ModulePanel
 
     private void ShowCards()
     {
+        ShowActions();
         var state = _state;
         // Spoolman down: Moonraker keeps counting and sends the reports later.
         string? banner = _error ?? (state is { Stale: true }
@@ -517,13 +540,138 @@ public partial class SpoolmanPanel : ModulePanel
         finally { _switching = false; }
         // Right away, not up to a refresh later (the tile too).
         await Task.Delay(300);
-        _wake = true;
+        _fresh = _wake = true;
+    }
+
+    // ---- load and unload -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The toolhead Load and Unload act on (the one Use puts spools in; null on a printer without
+    /// tool macros), whether it's the one in use, and the macro to run, or why there's none.
+    /// </summary>
+    private (Tool? Tool, bool InUse, string? Script, string? Why) Action(bool load)
+    {
+        string name = FilamentMacros.Name(load);
+        if (_state is not { } state)
+            return (null, false, null, "Waiting for the printer");
+        int target = Target(state);
+        var tool = target >= 0 ? state.Tools.Tools[target] : null;
+        bool inUse = tool == null || !state.MultiTool || target == state.Tools.Active;
+        int number = tool != null && int.TryParse(tool.Name.AsSpan(1), out int n) ? n : -1;
+        string chosen = load ? _loadMacro : _unloadMacro;
+        bool own = !chosen.Equals(name, StringComparison.OrdinalIgnoreCase);
+        string? script = _macros.Script(load, number, inUse, chosen);
+        string? why = script != null ? null
+            : own ? $"{chosen} only works on the toolhead in use. Add {{tool}} to it in the module's settings to pick one."
+            : _macros.Macros.Contains(name) ? $"{name} only works on the toolhead in use"
+            : $"The printer has no {name} macro. Pick another one in the module's settings.";
+        if (_status.State is "printing" or "paused")
+            why = "Not while printing";
+        return (tool, inUse, script, why);
+    }
+
+    private void ShowActions()
+    {
+        foreach (bool load in new[] { true, false })
+        {
+            var button = load ? LoadButton : UnloadButton;
+            var (tool, _, script, why) = Action(load);
+            string verb = load ? "load" : "unload";
+            string where = tool != null && _state is { MultiTool: true } ? " " + tool.Name : "";
+            bool armed = _actionArmed == load;
+            button.IsEnabled = why == null && _acting == null;
+            button.Tag = armed ? "armed" : null;
+            button.Content = armed ? $"Click again to {verb}{where}"
+                : _acting == load ? (load ? "Loading…" : "Unloading…")
+                : (load ? "Load" : "Unload") + where;
+            var spool = tool?.SpoolId is int id ? _state?.Spools.GetValueOrDefault(id) : tool == null ? _state?.ActiveSpool : null;
+            button.ToolTip = why ?? (load
+                ? $"Runs {script}" + (spool != null ? $" for {spool.Title}" : ". Pick its spool below with Use, so its usage is counted.")
+                : $"Runs {script}, and takes the spool out of {(where.Length > 0 ? where.Trim() : "the printer")} in Spoolman");
+        }
+    }
+
+    private async void OnActionClick(object sender, RoutedEventArgs e)
+    {
+        bool load = sender == LoadButton;
+        if (_state is not { } state || _acting != null)
+            return;
+        // Both heat and move the printer: a second click.
+        if (_actionArmed != load)
+        {
+            Disarm();
+            _actionArmed = load;
+            _disarm.Start();
+            ShowActions();
+            return;
+        }
+        Disarm();
+        var (tool, inUse, script, why) = Action(load);
+        if (script == null || why != null)
+            return;
+        string where = tool != null && state.MultiTool ? " " + tool.Name : "";
+        _acting = load;
+        ShowActions();
+        ShowNote($"{(load ? "Loading" : "Unloading")}{where}… The printer heats up first, so this can take a few minutes.", warn: false);
+        try
+        {
+            // Its own last word, e.g. "Filament free: pull it out".
+            string said = await _source.Api.RunGcodeAsync(script, _lifetime) is { } message ? " " + Sentence(message) : "";
+            try
+            {
+                if (!load && tool != null)
+                    await _source.Api.SetToolSpoolAsync(tool.Name, null, inUse, _lifetime);
+                else if (!load)
+                    await _source.Api.SetActiveSpoolAsync(null, _lifetime);
+                // The tool's spool is the one Moonraker counts, if it's the tool in use.
+                else if (tool?.SpoolId is int id && inUse && state.Status.ActiveSpoolId != id)
+                    await _source.Api.SetActiveSpoolAsync(id, _lifetime);
+                var spool = tool?.SpoolId is int loaded ? state.Spools.GetValueOrDefault(loaded) : tool == null ? state.ActiveSpool : null;
+                ShowNote(load
+                    ? spool != null ? $"Loaded {spool.Title}{where}.{said}" : $"Loaded{where}.{said} Pick its spool below with Use, so its usage is counted."
+                    : $"Unloaded{where}.{said} Pick the next spool below with Use, then Load.", warn: false);
+            }
+            catch (Exception ex) when (!_lifetime.IsCancellationRequested)
+            {
+                ShowNote($"{(load ? "Loaded" : "Unloaded")}{where}, but couldn't update the spool: "
+                         + (ex is SpoolmanException ? ex.Message : _printer.DescribeError(ex)), warn: true);
+            }
+        }
+        catch (Exception ex) when (!_lifetime.IsCancellationRequested)
+        {
+            ShowNote($"Couldn't {(load ? "load" : "unload")}{where}: "
+                     + (ex is GcodeException ? ex.Message : _printer.DescribeError(ex)), warn: true);
+        }
+        finally
+        {
+            _acting = null;
+            ShowActions();
+        }
+        await Task.Delay(300);
+        _fresh = _wake = _listWake = true;
+    }
+
+    /// <summary>A macro's message as a sentence: "Filament free: pull it out" → "Filament free: pull it out.".</summary>
+    internal static string Sentence(string message) =>
+        message.Length > 0 && !".!?".Contains(message[^1]) ? message + "." : message;
+
+    private void ShowNote(string text, bool warn)
+    {
+        ActionText.Text = text;
+        ActionText.Foreground = warn ? WarnText : NoteText;
+        ActionNote.Background = warn ? WarnBack : NoteBack;
+        ActionNote.Visibility = Visibility.Visible;
     }
 
     private void Disarm()
     {
         _disarm.Stop();
         SwitchNote.Visibility = Visibility.Collapsed;
+        if (_actionArmed != null)
+        {
+            _actionArmed = null;
+            ShowActions();
+        }
         if (_armed == null)
             return;
         _armed = null;
@@ -594,7 +742,11 @@ public partial class SpoolmanPanel : ModulePanel
                                   CardBrush = Frozen(Color.FromRgb(0x1F, 0x1F, 0x1F)),
                                   CardEdge = Frozen(Color.FromRgb(0x2E, 0x2E, 0x2E)),
                                   DashBrush = Frozen(Color.FromRgb(0x3A, 0x3A, 0x3A)),
-                                  UsedBrush = Frozen(Color.FromRgb(0x33, 0x33, 0x33));
+                                  UsedBrush = Frozen(Color.FromRgb(0x33, 0x33, 0x33)),
+                                  NoteBack = Frozen(Color.FromRgb(0x1F, 0x2A, 0x33)),
+                                  NoteText = Frozen(Color.FromRgb(0xB9, 0xDC, 0xF2)),
+                                  WarnBack = Frozen(Color.FromRgb(0x3A, 0x2F, 0x12)),
+                                  WarnText = Frozen(Color.FromRgb(0xF0, 0xD5, 0x8A));
 
     private static Brush Frozen(Color color)
     {

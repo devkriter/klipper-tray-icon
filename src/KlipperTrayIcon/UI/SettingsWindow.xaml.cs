@@ -36,8 +36,11 @@ public partial class SettingsWindow : Window
     private List<string> _modules = [];
     // Modules' settings, as changed in the Modules window (by module id, then setting id).
     private Dictionary<string, Dictionary<string, double>> _moduleSettings = [];
+    private Dictionary<string, Dictionary<string, string>> _moduleTextSettings = [];
     // Why each module can't be used with the printer last reached (null: it can).
     private readonly Dictionary<IModule, string?> _moduleProblems = new();
+    // Modules' text settings' choices from the printer last reached (e.g. its macros), by module and setting id.
+    private readonly Dictionary<(string, string), IReadOnlyList<string>> _moduleChoices = new();
     // Open while the user picks modules, to show what the printer says once it answers.
     private ModulesWindow? _modulesWindow;
     private readonly Action? _update;
@@ -67,6 +70,7 @@ public partial class SettingsWindow : Window
         ConsoleCheck.IsChecked = config.WebcamConsole;
         _modules = ModuleRegistry.All.Select(m => m.Id).Where(config.Modules.Contains).ToList();
         _moduleSettings = config.ModuleSettings.ToDictionary(p => p.Key, p => new Dictionary<string, double>(p.Value));
+        _moduleTextSettings = config.ModuleTextSettings.ToDictionary(p => p.Key, p => new Dictionary<string, string>(p.Value));
         ShowModules();
         // Sensors already chosen stay listed even before the printer answers.
         _sensors = config.StatsTiles?.Where(StatusText.IsSensorTile).ToList() ?? [];
@@ -241,6 +245,7 @@ public partial class SettingsWindow : Window
         config.Modules = config.Modules.Where(id => ModuleRegistry.All.All(m => m.Id != id))
             .Concat(_modules).ToList();
         config.ModuleSettings = _moduleSettings;
+        config.ModuleTextSettings = _moduleTextSettings;
         config.CheckForUpdates = UpdateCheck.IsChecked == true;
         return config;
     }
@@ -477,11 +482,13 @@ public partial class SettingsWindow : Window
 
     private void OnModulesClick(object sender, RoutedEventArgs e)
     {
-        _modulesWindow = new ModulesWindow(_modules, ModuleProblem, _moduleSettings) { Owner = this };
+        _modulesWindow = new ModulesWindow(_modules, ModuleProblem, _moduleSettings, _moduleTextSettings,
+                                           (m, s) => _moduleChoices.GetValueOrDefault((m.Id, s.Id)) ?? []) { Owner = this };
         try
         {
             if (_modulesWindow.ShowDialog() == true && _modulesWindow.Result is { } picked)
-                (_modules, _moduleSettings) = (picked.ToList(), _modulesWindow.SettingsResult);
+                (_modules, _moduleSettings, _moduleTextSettings) =
+                    (picked.ToList(), _modulesWindow.SettingsResult, _modulesWindow.TextSettingsResult);
         }
         finally { _modulesWindow = null; }
         ShowModules();
@@ -496,6 +503,11 @@ public partial class SettingsWindow : Window
         {
             try { _moduleProblems[module] = await Task.Run(() => module.CheckAsync(printer, default)); }
             catch (Exception) { } // can't tell: leave it as it is
+            foreach (var setting in module.Settings.Where(s => s.IsText))
+            {
+                try { _moduleChoices[(module.Id, setting.Id)] = await Task.Run(() => module.ChoicesAsync(setting, printer, default)); }
+                catch (Exception) { } // no dropdown, then
+            }
         }
         ShowModules();
     }

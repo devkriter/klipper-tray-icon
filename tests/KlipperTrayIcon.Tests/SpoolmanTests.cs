@@ -37,6 +37,12 @@ public class SpoolmanTests
         public bool SpoolmanUp = true;
         public string Objects = """["toolhead","extruder","heater_bed","gcode_macro PRINT_START"]""";
         public string Query = """{"toolhead":{"extruder":"extruder"}}""";
+        // Klipper's config, for the macros' G-code.
+        public string ConfigSettings = "{}";
+        // The console, oldest first, with an error from before; and what scripts print when run (and whether
+        // Moonraker answers 400, as for action_raise_error).
+        public readonly List<(string Message, double Time)> Console = [("!! Must home axis first", 1), ("ok", 2)];
+        public readonly Dictionary<string, (bool Refused, string[] Says)> Scripts = new();
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -44,8 +50,25 @@ public class SpoolmanTests
             string path = Uri.UnescapeDataString(request.RequestUri!.PathAndQuery);
             lock (Requests)
                 Requests.Add($"{request.Method} {path}{(body.Length > 0 ? " " + body : "")}");
+            const string script = "/printer/gcode/script?script=";
+            if (path.StartsWith(script) && Scripts.TryGetValue(path[script.Length..], out var run))
+            {
+                Console.Add((path[script.Length..], Console[^1].Time + 1));
+                foreach (string line in run.Says)
+                    Console.Add((line, Console[^1].Time + 1));
+                if (run.Refused)
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent("""{"error":{"code":400,"message":"Extrude below minimum temp"}}"""),
+                    };
+            }
             string? json = path switch
             {
+                _ when path.StartsWith("/server/gcode_store?count=") =>
+                    """{"result":{"gcode_store":""" + JsonSerializer.Serialize(
+                        Console.TakeLast(int.Parse(path["/server/gcode_store?count=".Length..]))
+                               .Select(c => new { message = c.Message, time = c.Time, type = "response" })) + "}}",
+                "/printer/objects/query?configfile=settings" => """{"result":{"status":{"configfile":{"settings":""" + ConfigSettings + "}}}}",
                 "/server/info" => """{"result":{"components":["file_manager","spoolman","history"]}}""",
                 "/server/spoolman/status" => SpoolmanUp
                     ? """{"result":{"spoolman_connected":true,"pending_reports":[],"spool_id":7}}"""
@@ -378,5 +401,123 @@ public class SpoolmanTests
         Assert.True(SpoolmanPanel.Matches(spool, "shelf a"));
         Assert.True(SpoolmanPanel.Matches(spool, "#12"));
         Assert.False(SpoolmanPanel.Matches(spool, "petg"));
+    }
+
+    [Fact]
+    public async Task FindsTheLoadAndUnloadMacros()
+    {
+        var (api, printer) = Make();
+        printer.Objects = """["toolhead","extruder","gcode_macro load_filament","gcode_macro UNLOAD_FILAMENT","gcode_macro _HIDDEN"]""";
+        var macros = await api.GetFilamentMacrosAsync(default);
+        Assert.Equal(["LOAD_FILAMENT", "UNLOAD_FILAMENT"], macros.Macros.Order());
+        Assert.Equal("LOAD_FILAMENT", macros.Script(load: true, -1, inUse: true));
+        Assert.Equal("UNLOAD_FILAMENT", macros.Script(load: false, -1, inUse: true));
+        // One toolhead: no need for Klipper's config.
+        Assert.DoesNotContain(printer.Requests, r => r.Contains("configfile"));
+
+        // None: nothing to run.
+        Assert.Null(FilamentMacros.None.Script(load: true, -1, inUse: true));
+        Assert.Null(FilamentMacros.None.Script(load: false, 2, inUse: true));
+    }
+
+    [Fact]
+    public async Task OnSeveralToolheadsTheMacrosTakeTheTool()
+    {
+        // The plain macros read a TOOL parameter (from their G-code in Klipper's config).
+        var (api, printer) = MakeFourTools();
+        printer.Objects = printer.Objects.Replace("\"gcode_macro PRINT_START\"", "\"gcode_macro LOAD_FILAMENT\",\"gcode_macro UNLOAD_FILAMENT\"");
+        printer.ConfigSettings = """
+            {"gcode_macro load_filament":{"gcode":"{% set t = params.TOOL|default(0)|int %}\nT{t}\nM109 S240\nG1 E80 F300"},
+             "gcode_macro unload_filament":{"gcode":"{% set e = params['EXTRUDER']|default('extruder') %}\nM109 S240 T0\nG1 E-80 F1200"}}
+            """;
+        var macros = await api.GetFilamentMacrosAsync(default);
+        Assert.Equal("TOOL", macros.LoadParameter);
+        Assert.Equal("EXTRUDER", macros.UnloadParameter);
+        Assert.Equal("LOAD_FILAMENT TOOL=1", macros.Script(load: true, 1, inUse: false));
+        Assert.Equal("UNLOAD_FILAMENT EXTRUDER=extruder3", macros.Script(load: false, 3, inUse: false));
+        Assert.Equal("UNLOAD_FILAMENT EXTRUDER=extruder", macros.Script(load: false, 0, inUse: true));
+
+        // A macro of each tool's own comes first; a plain one without a tool only works on the tool in use.
+        var own = new FilamentMacros(new HashSet<string> { "LOAD_FILAMENT", "UNLOAD_FILAMENT", "UNLOAD_FILAMENT_T1" });
+        Assert.Equal("UNLOAD_FILAMENT_T1", own.Script(load: false, 1, inUse: false));
+        Assert.Null(own.Script(load: false, 2, inUse: false));
+        Assert.Equal("UNLOAD_FILAMENT", own.Script(load: false, 2, inUse: true));
+        Assert.Null(own.Script(load: true, 0, inUse: false));
+
+        Assert.Equal("T", FilamentMacros.ToolParameter("T{params.T}"));
+        Assert.Equal("TOOL", FilamentMacros.ToolParameter("{% set tool = params[\"TOOL\"] %}"));
+        Assert.Null(FilamentMacros.ToolParameter("M109 S{params.TEMP|default(240)}\nG1 E-80"));
+        Assert.Null(FilamentMacros.ToolParameter(""));
+    }
+
+    [Fact]
+    public void TheMacroTheUserChoseRunsAsTyped()
+    {
+        var plain = new FilamentMacros(new HashSet<string> { "LOAD_FILAMENT", "LOAD_FILAMENT_T1" });
+        // The default name: found as usual.
+        Assert.Equal("LOAD_FILAMENT_T1", plain.Script(load: true, 1, inUse: false, chosen: "load_filament"));
+        // Their own: whether or not the printer has a macro by that name (it may be a command of a plugin).
+        Assert.Equal("MMU_LOAD", plain.Script(load: true, -1, inUse: true, chosen: "MMU_LOAD"));
+        Assert.Equal("MMU_EJECT", FilamentMacros.None.Script(load: false, -1, inUse: true, chosen: "MMU_EJECT"));
+        // {tool} is the toolhead's number; without it, only the tool in use.
+        Assert.Equal("MMU_LOAD GATE=2", plain.Script(load: true, 2, inUse: false, chosen: "MMU_LOAD GATE={tool}"));
+        Assert.Equal("MMU_LOAD GATE=0", plain.Script(load: true, -1, inUse: true, chosen: "MMU_LOAD GATE={tool}"));
+        Assert.Null(plain.Script(load: true, 2, inUse: false, chosen: "MMU_LOAD"));
+        Assert.Equal("MMU_LOAD", plain.Script(load: true, 2, inUse: true, chosen: "MMU_LOAD"));
+    }
+
+    [Fact]
+    public async Task ListsThePrintersMacrosForTheSettings()
+    {
+        var (api, printer) = Make();
+        printer.Objects = """
+            ["toolhead","gcode_macro PRINT_START","gcode_macro unload_filament","gcode_macro _CLIENT_VARIABLE",
+             "gcode_macro M600","gcode_macro LOAD_FILAMENT","gcode_macro CANCEL_PRINT","gcode_macro T0"]
+            """;
+        Assert.Equal(["LOAD_FILAMENT", "UNLOAD_FILAMENT", "CANCEL_PRINT", "M600", "PRINT_START", "T0"], await api.GetMacrosAsync(default));
+        var module = new SpoolmanModule();
+        var backend = new MoonrakerBackend("p", http: new HttpClient(printer));
+        Assert.Equal(6, (await ((Modules.IModule)module).ChoicesAsync(SpoolmanModule.LoadMacro, backend, default)).Count);
+        Assert.Empty(await ((Modules.IModule)module).ChoicesAsync(SpoolmanModule.Low, backend, default));
+        Assert.True(SpoolmanModule.LoadMacro.IsText);
+        Assert.Equal("UNLOAD_FILAMENT", SpoolmanModule.UnloadMacro.Text);
+    }
+
+    [Fact]
+    public async Task RunsAMacroAndSaysWhyItFailed()
+    {
+        var (api, printer) = Make();
+        // Says nothing: no message, and the old error in the console isn't this run's.
+        Assert.Null(await api.RunGcodeAsync("LOAD_FILAMENT TOOL=1", default));
+        Assert.Contains("POST /printer/gcode/script?script=LOAD_FILAMENT TOOL=1", printer.Requests);
+
+        // Its last message (RESPOND MSG="…").
+        printer.Scripts["LOAD_FILAMENT"] = (false, ["echo: Gears turning to grab the filament", "ok", "echo: Filament loaded at 240°C", "ok"]);
+        Assert.Equal("Filament loaded at 240°C", await api.RunGcodeAsync("LOAD_FILAMENT", default));
+
+        // A failure reported with RESPOND TYPE=error: Moonraker answers 200, the console says "!!".
+        printer.Scripts["UNLOAD_FILAMENT"] = (false, ["echo: Pulling", "!! FS_POST still sees filament after the full pull: tip stuck in the hotend", "ok"]);
+        var stuck = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT", default));
+        Assert.Equal("FS_POST still sees filament after the full pull: tip stuck in the hotend", stuck.Message);
+
+        // An error raised (400): Klipper's message is this run's "!!", its first line.
+        printer.Scripts["UNLOAD_FILAMENT T=1"] = (true, ["!! Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details"]);
+        var cold = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=1", default));
+        Assert.Equal("Extrude below minimum temp", cold.Message);
+        // Raised without a word in the console: not an older error.
+        printer.Scripts["UNLOAD_FILAMENT T=2"] = (true, []);
+        var quiet = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=2", default));
+        Assert.Equal("UNLOAD_FILAMENT T=2 failed", quiet.Message);
+
+        // A plain message that it had nothing to do isn't a failure.
+        printer.Scripts["UNLOAD_FILAMENT T=3"] = (false, ["// No filament in the toolhead: nothing to unload"]);
+        Assert.Equal("No filament in the toolhead: nothing to unload", await api.RunGcodeAsync("UNLOAD_FILAMENT T=3", default));
+        Assert.Equal("Filament free: pull it out.", SpoolmanPanel.Sentence("Filament free: pull it out"));
+        Assert.Equal("Done!", SpoolmanPanel.Sentence("Done!"));
+
+        // Taking a tool's spool out.
+        await api.SetToolSpoolAsync("T1", null, active: true, default);
+        Assert.Contains("POST /printer/gcode/script?script=SET_GCODE_VARIABLE MACRO=T1 VARIABLE=spool_id VALUE=None", printer.Requests);
+        Assert.Contains("POST /server/spoolman/spool_id {\"spool_id\":null}", printer.Requests);
     }
 }

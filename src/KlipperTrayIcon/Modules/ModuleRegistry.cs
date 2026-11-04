@@ -24,6 +24,10 @@ public static class ModuleRegistry
     public static IReadOnlyDictionary<string, double>? SavedSettings(AppConfig config, IModule module) =>
         config.ModuleSettings.GetValueOrDefault(module.Id);
 
+    /// <summary>A module's saved text settings, or null if none were changed.</summary>
+    public static IReadOnlyDictionary<string, string>? SavedTextSettings(AppConfig config, IModule module) =>
+        config.ModuleTextSettings.GetValueOrDefault(module.Id);
+
     /// <summary>How a module's tile is saved in stats_tiles: "print_queue:queue".</summary>
     public static string TileKey(IModule module, TileInfo tile) => $"{module.Id}:{tile.Id}";
 

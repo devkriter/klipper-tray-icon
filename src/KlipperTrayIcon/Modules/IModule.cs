@@ -45,6 +45,14 @@ public interface IModule
     IReadOnlyList<ModuleSetting> Settings => [];
 
     /// <summary>
+    /// A text setting's choices, asked from the printer (Settings calls it once it reaches the printer),
+    /// e.g. its macros. They're offered in a dropdown, and the user can still type anything else.
+    /// Empty (the default): just a text box.
+    /// </summary>
+    Task<IReadOnlyList<string>> ChoicesAsync(ModuleSetting setting, IPrinterBackend printer, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
+
+    /// <summary>
     /// Whether it can work with this kind of printer at all, e.g. <c>printer is IMoonrakerApi</c> for
     /// Klipper only. No network calls: Settings greys the module out when this is false.
     /// </summary>
@@ -98,23 +106,38 @@ public abstract class ModuleTile
 /// <param name="Default">Its value until the user changes it.</param>
 /// <param name="Unit">Shown after the box, e.g. "g". Empty: none.</param>
 /// <param name="Hint">A line under it on what it changes. Empty: none.</param>
+/// <param name="Text">For a text setting instead of a number (see <see cref="ForText"/>): its default.</param>
 public sealed record ModuleSetting(string Id, string Name, double Default, string Unit = "", string Hint = "",
-                                   double Min = 0, double Max = 100_000)
+                                   double Min = 0, double Max = 100_000, string? Text = null)
 {
+    /// <summary>A line of text the user can set, e.g. a macro's name; text is its default.</summary>
+    public static ModuleSetting ForText(string id, string name, string text, string hint = "") => new(id, name, 0, Hint: hint, Text: text);
+
+    public bool IsText => Text != null;
+
     /// <summary>The saved value (kept between Min and Max), or the default if there's none.</summary>
     public double ValueIn(IReadOnlyDictionary<string, double>? saved) =>
         saved != null && saved.TryGetValue(Id, out double value) && double.IsFinite(value) ? Math.Clamp(value, Min, Max) : Default;
+
+    /// <summary>A text setting's saved value (trimmed), or its default if there's none or it's empty.</summary>
+    public string TextIn(IReadOnlyDictionary<string, string>? saved) =>
+        saved != null && saved.TryGetValue(Id, out string? value) && value.Trim().Length > 0 ? value.Trim() : Text ?? "";
 }
 
 /// <summary>What a module's panel gets to work with.</summary>
 /// <param name="Printer">The printer. Klipper printers are also an <see cref="IMoonrakerApi"/>.</param>
 /// <param name="Lifetime">Cancelled when the popup goes away (settings changed, app exiting): stop any loops then.</param>
 /// <param name="Saved">The module's settings as saved, by id; read them with <see cref="Setting"/>.</param>
+/// <param name="SavedText">Its text settings as saved, by id; read them with <see cref="Text"/>.</param>
 public sealed record ModuleContext(IPrinterBackend Printer, CancellationToken Lifetime,
-                                   IReadOnlyDictionary<string, double>? Saved = null)
+                                   IReadOnlyDictionary<string, double>? Saved = null,
+                                   IReadOnlyDictionary<string, string>? SavedText = null)
 {
     /// <summary>One of the module's <see cref="IModule.Settings"/>: the user's value, or its default.</summary>
     public double Setting(ModuleSetting setting) => setting.ValueIn(Saved);
+
+    /// <summary>One of its text settings: the user's text, or its default.</summary>
+    public string Text(ModuleSetting setting) => setting.TextIn(SavedText);
 }
 
 /// <summary>

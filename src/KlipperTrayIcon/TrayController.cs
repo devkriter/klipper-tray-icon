@@ -34,6 +34,8 @@ public sealed class TrayController : IDisposable
     private PrinterStatus _lastOnline = PrinterStatus.Connecting;
     private (string State, double Progress, bool Preparing)? _lastDrawn;
     private DateTime? _configTime;
+    // Held while config.json is written from the popup, so the write isn't taken for a hand edit.
+    private readonly object _configLock = new();
     // Released to check the printer right away (the popup's stats strip just opened).
     private readonly SemaphoreSlim _statusWake = new(0);
     private static readonly TimeSpan StatsInterval = TimeSpan.FromSeconds(1);
@@ -204,7 +206,7 @@ public sealed class TrayController : IDisposable
         _popup = _backend.SupportsWebcam
             ? new WebcamPopup(_backend, _config.WebcamConsole && _backend.SupportsConsole,
                               ModuleRegistry.Enabled(_config, _backend), _config.ShowStats, _config.ModuleSettings,
-                              _config.ModuleTextSettings)
+                              _config.ModuleTextSettings, SaveModuleText)
             : null;
         if (_popup is { HasStats: true } popup)
             popup.IsVisibleChanged += (_, _) =>
@@ -212,6 +214,31 @@ public sealed class TrayController : IDisposable
                 if (popup.IsVisible && _statusWake.CurrentCount == 0)
                     _statusWake.Release();
             };
+    }
+
+    /// <summary>
+    /// A module saves one of its text settings from the popup (<see cref="ModuleContext.SaveText"/>), as
+    /// the Modules window would: only if it differs from the default. The popup stays as it is (UI thread).
+    /// </summary>
+    private void SaveModuleText(IModule module, ModuleSetting setting, string value)
+    {
+        value = value.Replace("\r\n", "\n").Trim();
+        // The popup was made with this same dictionary, so it's kept if the popup is made again.
+        var all = _config.ModuleTextSettings;
+        if (!all.TryGetValue(module.Id, out var saved))
+            all[module.Id] = saved = [];
+        if (value == setting.Text || value.Length == 0 && !setting.IsMultiLine)
+            saved.Remove(setting.Id);
+        else
+            saved[setting.Id] = value;
+        if (saved.Count == 0)
+            all.Remove(module.Id);
+        lock (_configLock)
+        {
+            try { ConfigStore.Save(_config); }
+            catch (Exception e) { App.LogError($"Module {module.Id}: saving {setting.Id}", e); }
+            _configTime = ConfigStore.LastWriteTime();
+        }
     }
 
     /// <summary>Switch to new settings without restarting (UI thread).</summary>
@@ -234,10 +261,13 @@ public sealed class TrayController : IDisposable
     /// <summary>Picks up hand edits to config.json (worker thread).</summary>
     private void ReloadConfigIfChanged()
     {
-        var time = ConfigStore.LastWriteTime();
-        if (time == _configTime)
-            return;
-        _configTime = time;
+        lock (_configLock)
+        {
+            var time = ConfigStore.LastWriteTime();
+            if (time == _configTime)
+                return;
+            _configTime = time;
+        }
         AppConfig? config;
         try { config = ConfigStore.Load(); }
         catch (Exception) { return; } // half-written or badly edited: keep the current settings

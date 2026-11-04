@@ -617,7 +617,7 @@ public partial class SpoolmanPanel : ModulePanel
         try
         {
             // Its own last word, e.g. "Filament free: pull it out".
-            string said = await _source.Api.RunGcodeAsync(script, _lifetime) is { } message ? " " + Sentence(message) : "";
+            string said = await ((IMoonrakerApi)_printer).RunGcodeAsync(script, _lifetime) is { } message ? " " + Sentence(message) : "";
             try
             {
                 if (!load && tool != null)

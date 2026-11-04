@@ -39,14 +39,23 @@ The print queue (`src/KlipperTrayIcon/Modules/PrintQueue/`) is a complete module
      `printer is IMoonrakerApi`. No network calls here.
    - `CheckAsync(printer, ct)` (optional): asks the printer whether it has what the module needs.
      Return `null` if it does, or a short reason (shown in the Modules window) if not.
-   - `CreatePanel(context)`: returns the module's panel.
+   - `CreatePanel(context)`: returns the module's panel, or null for none (no title bar button).
+   - `CreateConsoleInput(context)` (optional): a control docked at the bottom of the console, under
+     its lines, such as the *Console commands* module's command box. Derive it from
+     `ModuleConsoleInput`; it gets `OnStatus` and `OnPopupShown` like a panel, may draw above its
+     top edge over the console (a dropdown), and calls `ShowLatest()` to scroll the console to its
+     newest line and fetch new ones now. It's made only when the console is on.
    - `Settings` (optional): numbers the user can change on its page in the Modules window, e.g.
      `new ModuleSetting("low", "Low below", 100, "g", "The grams left turn amber.")` (id, label,
      default, unit, hint). Read them with `context.Setting(setting)`; they're saved in `config.json`
      under the module's id, so never change an id once released. For text, such as a macro's name,
      use `ModuleSetting.ForText("load_macro", "Load macro", "LOAD_FILAMENT", hint)` and read it with
-     `context.Text(setting)`; emptying its box gives the default back. A change reopens the popup, so
-     your panel and tiles always start with the current values.
+     `context.Text(setting)`; emptying its box gives the default back. For a list, give it several
+     lines: `ModuleSetting.ForText("pinned", "Pinned", "Home: G28", hint, lines: 6)` is a taller box,
+     one item per line, which can also be emptied. A change reopens the popup, so your panel and
+     tiles always start with the current values. To change a text setting from the popup (the
+     command box's *Pin*), call `context.SaveText(setting, value)`: it's saved in `config.json` as
+     the Modules window would, without reopening the popup, so keep using the new value yourself.
 3. **Build the panel**: a UserControl that derives from `ModulePanel`. In XAML:
    ```xml
    <modules:ModulePanel x:Class="KlipperTrayIcon.Modules.YourModule.YourPanel"
@@ -66,7 +75,9 @@ The print queue (`src/KlipperTrayIcon/Modules/PrintQueue/`) is a complete module
 4. **Talk to the printer** through `context.Printer`. For Klipper, cast it to `IMoonrakerApi`
    (`Printers/IMoonrakerApi.cs`), which calls [Moonraker's API](https://moonraker.readthedocs.io/en/latest/web_api/)
    with the address and API key already applied. Put your API calls in your folder (like
-   `PrintQueueApi.cs`) rather than in `MoonrakerBackend`. To show an error, use
+   `PrintQueueApi.cs`) rather than in `MoonrakerBackend`. To send G-code, use `SendGcodeAsync`
+   (Klipper's answer shows in the console) or `RunGcodeAsync`, which also returns what it printed
+   and throws `GcodeException` with Klipper's error (`Printers/Gcode.cs`). To show an error, use
    `context.Printer.DescribeError(exception)`.
    **A tile for the stats strip** (optional): list it in `Tiles`, e.g.
    `[new("queue", "Queued jobs", "QUEUE")]` (id, its name in Settings' tile menu, its short label in

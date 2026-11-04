@@ -163,19 +163,34 @@ public partial class ModulesWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         var name = new TextBlock { Text = setting.Name, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
         string Current() => setting.TextIn(_textSettings.GetValueOrDefault(module.Id));
-        var choices = _choices(module, setting);
+        IReadOnlyList<string> choices = setting.IsMultiLine ? [] : _choices(module, setting);
         Control box = choices.Count > 0
             ? new ComboBox { IsEditable = true, ItemsSource = choices, Text = Current(), MaxDropDownHeight = 260 }
             : new TextBox { Text = Current() };
         box.VerticalAlignment = VerticalAlignment.Center;
+        // Several lines: a taller box in the console's font, scrolling past its height.
+        if (setting.IsMultiLine && box is TextBox lines)
+        {
+            lines.AcceptsReturn = true;
+            lines.TextWrapping = TextWrapping.NoWrap;
+            lines.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            lines.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+            lines.FontFamily = (System.Windows.Media.FontFamily)FindResource("MonoFont");
+            lines.FontSize = 12;
+            lines.Height = setting.Lines * 18 + 10;
+            lines.VerticalContentAlignment = VerticalAlignment.Top;
+            name.VerticalAlignment = VerticalAlignment.Top;
+            name.Margin = new Thickness(0, 4, 0, 0);
+        }
         AutomationProperties.SetName(box, setting.Name);
         string Typed() => box is ComboBox combo ? combo.Text : ((TextBox)box).Text;
         void Keep(string typed)
         {
-            string value = typed.Trim();
+            string value = typed.Replace("\r\n", "\n").Trim();
             if (!_textSettings.TryGetValue(module.Id, out var saved))
                 _textSettings[module.Id] = saved = [];
-            if (value.Length == 0 || value == setting.Text)
+            // A list can be emptied; a single line emptied is its default again.
+            if (value.Length == 0 && !setting.IsMultiLine || value == setting.Text)
                 saved.Remove(setting.Id);
             else
                 saved[setting.Id] = value;
@@ -184,6 +199,8 @@ public partial class ModulesWindow : Window
         }
         void Show(string text)
         {
+            if (setting.IsMultiLine)
+                text = text.Replace("\n", Environment.NewLine);
             if (box is ComboBox combo)
                 combo.Text = text;
             else
@@ -196,10 +213,12 @@ public partial class ModulesWindow : Window
                 if (dropdown.SelectedItem is string picked)
                     Keep(picked);
             };
+        if (setting.IsMultiLine)
+            Show(Current());
         // Emptied: the default again, once the box is left.
         box.LostKeyboardFocus += (_, _) =>
         {
-            if (!box.IsKeyboardFocusWithin && box is not ComboBox { IsDropDownOpen: true })
+            if (!box.IsKeyboardFocusWithin && box is not ComboBox { IsDropDownOpen: true } && !setting.IsMultiLine)
                 Show(Current());
         };
         Grid.SetColumn(box, 1);

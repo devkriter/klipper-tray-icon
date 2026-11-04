@@ -22,8 +22,8 @@ The icon updates dynamically to show a circular progress bar corresponding to th
   the popup, once you unlock touch with the lock button (it starts locked, so a stray click can't
   press anything). See [Snapmaker U1 Support](#snapmaker-u1-support).
 - **Modules**: optional extras, all off until you turn them on in Settings under *Manage modules…*,
-  which lists them with what each one does and needs. Each
-  one gets a button in the popup's title bar, side by side with the console's, to switch the side
+  which lists them with what each one does and needs. Most
+  get a button in the popup's title bar, side by side with the console's, to switch the side
   panel to it. Want to add one? See [CONTRIBUTING.md](CONTRIBUTING.md).
   - **Print queue** (Klipper): the printer's print queue (Moonraker's job queue, as in Mainsail):
     thumbnails (hover one for a larger preview), drag to reorder, ✕ to remove. Below it are the
@@ -40,6 +40,11 @@ The icon updates dynamically to show a circular progress bar corresponding to th
     `LOAD_FILAMENT` and `UNLOAD_FILAMENT` macros (or the ones you pick in the module's settings)
     after a second click, and *Unload* takes the spool out in Spoolman. Its *SPOOL* tile shows
     what's left on the spool in use, in amber when it's low or short for the print.
+  - **Console commands** (Klipper): a box under the console to send G-code, with no button of its
+    own. Click the empty box for your pinned and recent commands; as you type it suggests the
+    printer's commands and macros, with their descriptions. While printing or paused, every command
+    asks for a second click. Pins are a list in the module's settings (`Nozzle: M104 S{240}` asks
+    for the temperature); right-click a recent command to pin it.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,
@@ -213,7 +218,8 @@ For Bambu Lab (see `config.example.bambu.json`):
 }
 ```
 
-`modules` lists the modules turned on, e.g. `["print_queue", "spoolman"]`.
+`modules` lists the modules turned on, e.g. `["print_queue", "spoolman", "commands"]`. The command
+box keeps the last 100 commands sent to each printer in `command_history.json`, next to `config.json`.
 
 `show_stats` shows the stats strip; `stats_tiles` lists its tiles, e.g. `["nozzle", "bed", "progress",
 "elapsed", "print_queue:queue", "time_left"]` (null: the default).

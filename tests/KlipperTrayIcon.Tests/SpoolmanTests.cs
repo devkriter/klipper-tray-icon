@@ -486,32 +486,34 @@ public class SpoolmanTests
     [Fact]
     public async Task RunsAMacroAndSaysWhyItFailed()
     {
-        var (api, printer) = Make();
+        var printer = new FakeMoonraker();
+        var backend = new MoonrakerBackend("p", http: new HttpClient(printer));
+        var api = new SpoolmanApi(backend);
         // Says nothing: no message, and the old error in the console isn't this run's.
-        Assert.Null(await api.RunGcodeAsync("LOAD_FILAMENT TOOL=1", default));
+        Assert.Null(await backend.RunGcodeAsync("LOAD_FILAMENT TOOL=1", default));
         Assert.Contains("POST /printer/gcode/script?script=LOAD_FILAMENT TOOL=1", printer.Requests);
 
         // Its last message (RESPOND MSG="…").
         printer.Scripts["LOAD_FILAMENT"] = (false, ["echo: Gears turning to grab the filament", "ok", "echo: Filament loaded at 240°C", "ok"]);
-        Assert.Equal("Filament loaded at 240°C", await api.RunGcodeAsync("LOAD_FILAMENT", default));
+        Assert.Equal("Filament loaded at 240°C", await backend.RunGcodeAsync("LOAD_FILAMENT", default));
 
         // A failure reported with RESPOND TYPE=error: Moonraker answers 200, the console says "!!".
         printer.Scripts["UNLOAD_FILAMENT"] = (false, ["echo: Pulling", "!! FS_POST still sees filament after the full pull: tip stuck in the hotend", "ok"]);
-        var stuck = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT", default));
+        var stuck = await Assert.ThrowsAsync<GcodeException>(() => backend.RunGcodeAsync("UNLOAD_FILAMENT", default));
         Assert.Equal("FS_POST still sees filament after the full pull: tip stuck in the hotend", stuck.Message);
 
         // An error raised (400): Klipper's message is this run's "!!", its first line.
         printer.Scripts["UNLOAD_FILAMENT T=1"] = (true, ["!! Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details"]);
-        var cold = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=1", default));
+        var cold = await Assert.ThrowsAsync<GcodeException>(() => backend.RunGcodeAsync("UNLOAD_FILAMENT T=1", default));
         Assert.Equal("Extrude below minimum temp", cold.Message);
         // Raised without a word in the console: not an older error.
         printer.Scripts["UNLOAD_FILAMENT T=2"] = (true, []);
-        var quiet = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=2", default));
+        var quiet = await Assert.ThrowsAsync<GcodeException>(() => backend.RunGcodeAsync("UNLOAD_FILAMENT T=2", default));
         Assert.Equal("UNLOAD_FILAMENT T=2 failed", quiet.Message);
 
         // A plain message that it had nothing to do isn't a failure.
         printer.Scripts["UNLOAD_FILAMENT T=3"] = (false, ["// No filament in the toolhead: nothing to unload"]);
-        Assert.Equal("No filament in the toolhead: nothing to unload", await api.RunGcodeAsync("UNLOAD_FILAMENT T=3", default));
+        Assert.Equal("No filament in the toolhead: nothing to unload", await backend.RunGcodeAsync("UNLOAD_FILAMENT T=3", default));
         Assert.Equal("Filament free: pull it out.", SpoolmanPanel.Sentence("Filament free: pull it out"));
         Assert.Equal("Done!", SpoolmanPanel.Sentence("Done!"));
 

@@ -9,7 +9,8 @@ namespace KlipperTrayIcon.Modules;
 
 /// <summary>
 /// An optional feature with a panel in the webcam popup. Every module is off until the user turns
-/// it on in Settings; once on, it gets a button in the popup's title bar, beside the console's.
+/// it on in Settings; once on, it gets a button in the popup's title bar, beside the console's. A
+/// module can instead (or also) add a control under the console: see <see cref="CreateConsoleInput"/>.
 /// Each lives in its own folder under Modules/ and is listed in <see cref="ModuleRegistry.All"/>.
 /// See CONTRIBUTING.md.
 /// </summary>
@@ -64,8 +65,14 @@ public interface IModule
     /// </summary>
     Task<string?> CheckAsync(IPrinterBackend printer, CancellationToken ct) => Task.FromResult<string?>(null);
 
-    /// <summary>Its panel, made once for each popup (when the popup is made, hidden).</summary>
-    ModulePanel CreatePanel(ModuleContext context);
+    /// <summary>Its panel, made once for each popup (when the popup is made, hidden). Null: no panel, and no title bar button.</summary>
+    ModulePanel? CreatePanel(ModuleContext context) => null;
+
+    /// <summary>
+    /// A control docked at the bottom of the console, under its lines (e.g. a box to type commands in),
+    /// made once for each popup that shows the console. Null (the default): none.
+    /// </summary>
+    ModuleConsoleInput? CreateConsoleInput(ModuleContext context) => null;
 
     /// <summary>
     /// Tiles it offers for the stats strip, while it's on. The user adds them to the strip in Settings,
@@ -107,21 +114,30 @@ public abstract class ModuleTile
 /// <param name="Unit">Shown after the box, e.g. "g". Empty: none.</param>
 /// <param name="Hint">A line under it on what it changes. Empty: none.</param>
 /// <param name="Text">For a text setting instead of a number (see <see cref="ForText"/>): its default.</param>
+/// <param name="Lines">A text setting's height in lines. Above 1 it takes several lines (one item per line, say).</param>
 public sealed record ModuleSetting(string Id, string Name, double Default, string Unit = "", string Hint = "",
-                                   double Min = 0, double Max = 100_000, string? Text = null)
+                                   double Min = 0, double Max = 100_000, string? Text = null, int Lines = 1)
 {
-    /// <summary>A line of text the user can set, e.g. a macro's name; text is its default.</summary>
-    public static ModuleSetting ForText(string id, string name, string text, string hint = "") => new(id, name, 0, Hint: hint, Text: text);
+    /// <summary>
+    /// Text the user can set, e.g. a macro's name; text is its default. With lines above 1, a box that
+    /// tall which takes several lines, e.g. a list (one item per line).
+    /// </summary>
+    public static ModuleSetting ForText(string id, string name, string text, string hint = "", int lines = 1) =>
+        new(id, name, 0, Hint: hint, Text: text, Lines: lines);
 
     public bool IsText => Text != null;
+    public bool IsMultiLine => IsText && Lines > 1;
 
     /// <summary>The saved value (kept between Min and Max), or the default if there's none.</summary>
     public double ValueIn(IReadOnlyDictionary<string, double>? saved) =>
         saved != null && saved.TryGetValue(Id, out double value) && double.IsFinite(value) ? Math.Clamp(value, Min, Max) : Default;
 
-    /// <summary>A text setting's saved value (trimmed), or its default if there's none or it's empty.</summary>
+    /// <summary>
+    /// A text setting's saved value (trimmed), or its default if there's none or it's empty. A
+    /// multi-line one can be saved empty (an emptied list), and stays empty.
+    /// </summary>
     public string TextIn(IReadOnlyDictionary<string, string>? saved) =>
-        saved != null && saved.TryGetValue(Id, out string? value) && value.Trim().Length > 0 ? value.Trim() : Text ?? "";
+        saved != null && saved.TryGetValue(Id, out string? value) && (value.Trim().Length > 0 || IsMultiLine) ? value.Trim() : Text ?? "";
 }
 
 /// <summary>What a module's panel gets to work with.</summary>
@@ -138,6 +154,16 @@ public sealed record ModuleContext(IPrinterBackend Printer, CancellationToken Li
 
     /// <summary>One of its text settings: the user's text, or its default.</summary>
     public string Text(ModuleSetting setting) => setting.TextIn(SavedText);
+
+    /// <summary>
+    /// Saves one of its text settings from the popup (e.g. a list the user added to there), in
+    /// config.json as the Modules window would. Unlike a change there, it doesn't reopen the popup, so
+    /// keep using the new value yourself. UI thread.
+    /// </summary>
+    public void SaveText(ModuleSetting setting, string value) => TextSaver?.Invoke(setting, value);
+
+    /// <summary>Set by the popup: writes a text setting of this module to config.json.</summary>
+    internal Action<ModuleSetting, string>? TextSaver { get; init; }
 }
 
 /// <summary>
@@ -154,4 +180,23 @@ public class ModulePanel : UserControl
     public virtual void OnPopupShown() { }
     /// <summary>Its button was selected (true), or another one was (false).</summary>
     public virtual void OnSelected(bool selected) { }
+}
+
+/// <summary>
+/// A module's control under the console (<see cref="IModule.CreateConsoleInput"/>), docked at its
+/// bottom, the width of the side panel. It may draw above its own top edge, over the console's
+/// lines (a dropdown, say). Derive a UserControl from it, as for <see cref="ModulePanel"/>. All of
+/// these are called on the UI thread.
+/// </summary>
+public class ModuleConsoleInput : UserControl
+{
+    /// <summary>Each status update from the tray (every couple of seconds; every second while the popup is open).</summary>
+    public virtual void OnStatus(PrinterStatus status) { }
+    /// <summary>The popup was opened.</summary>
+    public virtual void OnPopupShown() { }
+
+    /// <summary>Scrolls the console to its newest line and checks for new ones now (e.g. after sending a command).</summary>
+    protected void ShowLatest() => LatestWanted?.Invoke();
+
+    internal event Action? LatestWanted;
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- *Console commands* module: a box under the console to send G-code. Clicked while empty it
+  lists your pinned commands, then your recent ones (the last 100 per printer, kept in
+  `command_history.json`). Typing suggests the printer's commands and macros with their
+  descriptions, matching anywhere in the name; Tab fills in, Enter sends, and Up and Down in the
+  empty box step through history. A command the printer doesn't know gets "Did you mean G28?".
+  While printing or paused, every command needs a second click or Enter ("Send anyway"). When
+  Klipper has shut down it offers `FIRMWARE_RESTART` and `RESTART`. Pins are a list in the
+  module's settings, one `Name: command` per line, where `{240}` asks for a value; right-click a
+  recent command to pin it, or a pin to unpin it.
+- Modules can add a control under the console (`IModule.CreateConsoleInput`), have text settings
+  of several lines (`ModuleSetting.ForText(..., lines: 6)`) and save a text setting from the popup
+  (`ModuleContext.SaveText`). A module no longer needs a panel of its own.
+
+### Changed
+- Sending G-code and reading what it printed (`Gcode.RunGcodeAsync`, `SendGcodeAsync`) moved out of
+  the Spoolman module to `Printers/Gcode.cs`, for any module to use.
+
 ## [2.15.0] - 2026-11-04
 ### Added
 - Spoolman: *Load* and *Unload* at the top right of the Filament page run the printer's

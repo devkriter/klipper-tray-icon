@@ -75,12 +75,14 @@ public partial class WebcamPopup : Window
     // Reused for every raw frame of the same size (Bambu), instead of a new bitmap per frame.
     private WriteableBitmap? _video;
 
-    /// <param name="modules">Enabled modules: each gets a panel, beside the console.</param>
+    /// <param name="modules">Enabled modules: each gets a panel beside the console, and/or a control under it.</param>
     /// <param name="moduleSettings">Each module's saved settings (by module id).</param>
     /// <param name="moduleTextSettings">Each module's saved text settings (by module id).</param>
+    /// <param name="saveText">Saves a module's text setting to config.json (<see cref="ModuleContext.SaveText"/>).</param>
     public WebcamPopup(IPrinterBackend backend, bool showConsole, IReadOnlyList<IModule>? modules = null, bool showStats = true,
                        IReadOnlyDictionary<string, Dictionary<string, double>>? moduleSettings = null,
-                       IReadOnlyDictionary<string, Dictionary<string, string>>? moduleTextSettings = null)
+                       IReadOnlyDictionary<string, Dictionary<string, string>>? moduleTextSettings = null,
+                       Action<IModule, ModuleSetting, string>? saveText = null)
     {
         InitializeComponent();
         _backend = backend;
@@ -88,7 +90,9 @@ public partial class WebcamPopup : Window
         _modules = modules;
         _moduleSettings = moduleSettings ?? new Dictionary<string, Dictionary<string, double>>();
         _moduleTextSettings = moduleTextSettings ?? new Dictionary<string, Dictionary<string, string>>();
-        _showPanel = showConsole || modules.Count > 0;
+        _saveText = saveText;
+        var panels = CreatePanels(modules);
+        _showPanel = showConsole || panels.Count > 0;
         _showStats = showStats;
         if (!showStats)
             StatsStrip.Visibility = Visibility.Collapsed;
@@ -109,7 +113,7 @@ public partial class WebcamPopup : Window
             UpdateArrangement();
             if (showConsole)
                 _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
-            SetUpPanels(showConsole, modules);
+            SetUpPanels(showConsole, panels);
             ShowStatus(PrinterStatus.Connecting);
         }
         if (backend.SecondViewName != null)
@@ -196,6 +200,8 @@ public partial class WebcamPopup : Window
         _console?.Resume();
         foreach (var page in _pages)
             page.Module?.OnPopupShown();
+        foreach (var input in _inputs)
+            input.OnPopupShown();
         StartSession();
     }
 
@@ -364,22 +370,37 @@ public partial class WebcamPopup : Window
     private readonly List<(FrameworkElement View, ModulePanel? Module, System.Windows.Controls.Button Button)> _pages = new();
     private int _page = -1;
 
-    private void SetUpPanels(bool showConsole, IReadOnlyList<IModule> modules)
+    // The modules' controls under the console (IModule.CreateConsoleInput).
+    private readonly List<ModuleConsoleInput> _inputs = new();
+
+    /// <summary>The modules' panels, for those that have one.</summary>
+    private List<(IModule Module, ModulePanel Panel)> CreatePanels(IReadOnlyList<IModule> modules)
     {
-        if (showConsole)
-            AddPage("Console", "\uE756", ConsoleView, null);
-        else
-            ConsoleView.Visibility = Visibility.Collapsed;
+        var panels = new List<(IModule, ModulePanel)>();
         foreach (var module in modules)
         {
-            ModulePanel panel;
             // A module that fails to start is left out, rather than taking the popup with it.
-            try { panel = module.CreatePanel(Context(module)); }
-            catch (Exception e)
+            try
             {
-                App.LogError($"Module {module.Id}", e);
-                continue;
+                if (module.CreatePanel(Context(module)) is { } panel)
+                    panels.Add((module, panel));
             }
+            catch (Exception e) { App.LogError($"Module {module.Id}", e); }
+        }
+        return panels;
+    }
+
+    private void SetUpPanels(bool showConsole, List<(IModule Module, ModulePanel Panel)> panels)
+    {
+        if (showConsole)
+        {
+            AddPage("Console", "\uE756", ConsoleView, null);
+            AddConsoleInputs();
+        }
+        else
+            ConsoleView.Visibility = Visibility.Collapsed;
+        foreach (var (module, panel) in panels)
+        {
             panel.Visibility = Visibility.Collapsed;
             PanelHost.Children.Add(panel);
             AddPage(module.Name, module.Icon != null ? DrawnIcon(module.Icon) : module.Glyph, panel, panel);
@@ -388,6 +409,30 @@ public partial class WebcamPopup : Window
         PanelButtons.Visibility = _pages.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         if (_pages.Count > 0)
             ShowPage(0);
+    }
+
+    /// <summary>Docks the modules' controls at the bottom of the console, in the registry's order (the first lowest).</summary>
+    private void AddConsoleInputs()
+    {
+        foreach (var module in _modules)
+        {
+            ModuleConsoleInput? input;
+            try { input = module.CreateConsoleInput(Context(module)); }
+            catch (Exception e)
+            {
+                App.LogError($"Module {module.Id}", e);
+                continue;
+            }
+            if (input == null)
+                continue;
+            System.Windows.Controls.DockPanel.SetDock(input, System.Windows.Controls.Dock.Bottom);
+            // After the heading, before the lines (the last child fills what's left).
+            ConsoleView.Children.Insert(1, input);
+            // In front of the lines, so it can draw over them (its dropdown).
+            System.Windows.Controls.Panel.SetZIndex(input, 1);
+            input.LatestWanted += () => _console?.ShowLatest();
+            _inputs.Add(input);
+        }
     }
 
     /// <summary>A module's drawn icon (<see cref="IModule.Icon"/>), at the size of the title bar's glyphs.</summary>
@@ -451,8 +496,13 @@ public partial class WebcamPopup : Window
     private readonly IReadOnlyDictionary<string, Dictionary<string, double>> _moduleSettings;
     private readonly IReadOnlyDictionary<string, Dictionary<string, string>> _moduleTextSettings;
 
+    private readonly Action<IModule, ModuleSetting, string>? _saveText;
+
     private ModuleContext Context(IModule module) => new(_backend, _lifetime.Token, _moduleSettings.GetValueOrDefault(module.Id),
-                                                         _moduleTextSettings.GetValueOrDefault(module.Id));
+                                                         _moduleTextSettings.GetValueOrDefault(module.Id))
+    {
+        TextSaver = _saveText == null ? null : (setting, value) => _saveText(module, setting, value),
+    };
     private readonly Dictionary<string, ModuleTile?> _moduleTiles = new();
     private PrinterStatus _lastStatus = PrinterStatus.Connecting;
     private bool _stripDue;
@@ -473,6 +523,8 @@ public partial class WebcamPopup : Window
         StateDot.Fill = status.Halted != null ? ErrorDot : status.Preparing ? PreparingDot : StateBrush(status.State);
         foreach (var page in _pages)
             page.Module?.OnStatus(status);
+        foreach (var input in _inputs)
+            input.OnStatus(status);
         // Offline (Klipper restarting, say) says nothing about it: the line stays until it's running.
         if (status.State != "offline")
             _console?.ShowHalted(status.Halted);
@@ -1030,6 +1082,13 @@ internal sealed class ConsoleFeed
 
     // Opening the popup also re-reads Mainsail's filters, in case they were changed there.
     public void Resume() { _active = true; _wake = true; _filterDue = true; }
+
+    /// <summary>Scrolls to the newest line, and keeps following new ones (fetched now, rather than within the second).</summary>
+    public void ShowLatest()
+    {
+        _wake = true;
+        _scroll.ScrollToEnd();
+    }
     public void Pause() => _active = false;
 
     private async Task LoopAsync(CancellationToken ct)

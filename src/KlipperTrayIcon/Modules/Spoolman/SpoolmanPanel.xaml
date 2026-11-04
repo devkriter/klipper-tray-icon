@@ -7,6 +7,8 @@
     <modules:ModulePanel.Resources>
         <!-- Use: small and quiet, like the queue's Start next. Blue when it asks for the second click. -->
         <Style x:Key="UseButton" TargetType="Button">
+            <!-- Not focused by a click: the row it's in is replaced when it arms, and focus moving scrolls the page. -->
+            <Setter Property="Focusable" Value="False" />
             <Setter Property="Foreground" Value="#DADADA" />
             <Setter Property="Background" Value="#262626" />
             <Setter Property="BorderBrush" Value="#3A3A3A" />
@@ -236,7 +238,7 @@
             <ScrollViewer.Resources>
                 <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
             </ScrollViewer.Resources>
-            <StackPanel>
+            <StackPanel RequestBringIntoView="OnBringIntoView">
                 <!-- Spoolman or the printer isn't answering. -->
                 <Border x:Name="Banner" Background="#3A2F12" CornerRadius="5" Margin="10,10,10,0" Padding="10,7"
                         Visibility="Collapsed">

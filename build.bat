@@ -1,7 +1,7 @@
 @echo off
 setlocal
 rem Builds the release zip: publish\KlipperTrayIcon_v<VERSION>.zip
-set VERSION=2.15.0
+set VERSION=2.16.0
 set OUT=publish\KlipperTrayIcon
 cd /d "%~dp0"
 

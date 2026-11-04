@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.16.0] - 2026-11-04
 ### Added
 - *Console commands* module: a box under the console to send G-code. Clicked while empty it
   lists your pinned commands, then your recent ones (the last 100 per printer, kept in
@@ -23,7 +23,6 @@
 ### Changed
 - Sending G-code and reading what it printed (`Gcode.RunGcodeAsync`, `SendGcodeAsync`) moved out of
   the Spoolman module to `Printers/Gcode.cs`, for any module to use.
-### Changed
 - Spoolman: *Load* and *Unload* moved onto each card in *IN THE PRINTER*, shown when you hover
   over it, so on several toolheads they act on that card's toolhead. Clicking a card no longer
   picks a toolhead.
@@ -32,6 +31,9 @@
 - Spoolman: shorter text throughout ("Spoolman offline", "No spool", "File is ASA, spool is PLA",
   "Needs 41 g, 269 g spare"). Removed the footer, the note about switching during a print, and the
   hints about what to click next.
+
+### Fixed
+- Spoolman: clicking *Use* no longer scrolls the page by itself.
 
 ## [2.15.0] - 2026-11-04
 ### Added

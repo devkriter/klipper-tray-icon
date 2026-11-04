@@ -702,6 +702,16 @@ public partial class SpoolmanPanel : ModulePanel
         ActionNote.Visibility = Visibility.Visible;
     }
 
+    /// <summary>
+    /// The page scrolls only when the user scrolls it (or types in the filter), not when a click or a
+    /// redrawn row asks to be brought into view.
+    /// </summary>
+    private void OnBringIntoView(object sender, RequestBringIntoViewEventArgs e)
+    {
+        if (e.TargetObject != FilterBox)
+            e.Handled = true;
+    }
+
     private void Disarm()
     {
         _disarm.Stop();

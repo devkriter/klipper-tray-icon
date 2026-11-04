@@ -160,8 +160,30 @@
                             <TextBlock x:Name="Grams" Text="{Binding Weight}" Foreground="#DADADA" FontSize="13" HorizontalAlignment="Right" />
                             <TextBlock Text="{Binding Length}" Foreground="#8A8A8A" FontSize="11" HorizontalAlignment="Right" />
                         </StackPanel>
-                        <Button x:Name="Use" Style="{StaticResource UseButton}" Content="{Binding Use}" Tag="{Binding}"
+                        <Button x:Name="Use" Style="{StaticResource UseButton}" Content="Use" Tag="{Binding}"
                                 HorizontalAlignment="Right" Visibility="Hidden" Click="OnUseClick" />
+                        <!-- With several toolheads, Use opens one button per toolhead. -->
+                        <ItemsControl x:Name="Picks" ItemsSource="{Binding Picks}" HorizontalAlignment="Right" Visibility="Collapsed">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button x:Name="Pick" Style="{StaticResource UseButton}" Content="{Binding Name}" Tag="{Binding}"
+                                            Margin="3,0,0,0" Click="OnPickClick" />
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Armed}" Value="True">
+                                            <Setter TargetName="Pick" Property="Background" Value="#60CDFF" />
+                                            <Setter TargetName="Pick" Property="BorderBrush" Value="#60CDFF" />
+                                            <Setter TargetName="Pick" Property="Foreground" Value="#002033" />
+                                            <Setter TargetName="Pick" Property="FontWeight" Value="SemiBold" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </Grid>
                 </Grid>
             </Border>
@@ -185,25 +207,29 @@
                     <Setter TargetName="Use" Property="Foreground" Value="#002033" />
                     <Setter TargetName="Use" Property="FontWeight" Value="SemiBold" />
                 </DataTrigger>
+                <!-- Picking a toolhead: its buttons while hovering, and while one waits for its second click. -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Picking}" Value="True" />
+                        <Condition Binding="{Binding IsMouseOver, ElementName=Row}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="Weight" Property="Visibility" Value="Hidden" />
+                    <Setter TargetName="Use" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="Picks" Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Picking}" Value="True" />
+                        <Condition Binding="{Binding Armed}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="Weight" Property="Visibility" Value="Hidden" />
+                    <Setter TargetName="Use" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="Picks" Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </modules:ModulePanel.Resources>
     <DockPanel>
-        <!-- Whether Spoolman is connected, and who reports usage. -->
-        <Border DockPanel.Dock="Bottom" BorderBrush="#333333" BorderThickness="0,1,0,0" Padding="14,5">
-            <Grid>
-                <TextBlock FontSize="11" Foreground="#8A8A8A">
-                    <Run x:Name="FootDot" Text="●" Foreground="#3FB950" /><Run x:Name="FootText" Text=" Connecting…" />
-                </TextBlock>
-                <TextBlock Text="usage is reported by Moonraker" FontSize="11" Foreground="#8A8A8A" HorizontalAlignment="Right" />
-            </Grid>
-        </Border>
-        <!-- While Use waits for its second click, during a print. -->
-        <Border x:Name="SwitchNote" DockPanel.Dock="Bottom" Background="#1F2A33" CornerRadius="5" Margin="10,4,10,8" Padding="10,7"
-                Visibility="Collapsed">
-            <TextBlock Text="While printing, switching moves the rest of this print's usage to the new spool."
-                       Foreground="#B9DCF2" FontSize="12" TextWrapping="Wrap" />
-        </Border>
         <!-- The spools in the printer and the others scroll together: with several toolheads the cards fill the page. -->
         <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       PanningMode="VerticalOnly">
@@ -217,20 +243,10 @@
                     <TextBlock x:Name="BannerText" Foreground="#F0D58A" FontSize="12" TextWrapping="Wrap" />
                 </Border>
 
-                <!-- IN THE PRINTER, with Load and Unload on the right: the printer's macros, each after a second click. -->
-                <Grid Margin="14,9,10,6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="LoadedHeader" Text="IN THE PRINTER" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
-                               VerticalAlignment="Center" />
-                    <Button x:Name="LoadButton" Grid.Column="1" Style="{StaticResource ActionButton}" Content="Load"
-                            Click="OnActionClick" />
-                    <Button x:Name="UnloadButton" Grid.Column="2" Style="{StaticResource ActionButton}" Content="Unload"
-                            Margin="4,0,0,0" Click="OnActionClick" />
-                </Grid>
+                <!-- IN THE PRINTER. Each card has Load and Unload when hovered: the printer's macros, each after a second click. -->
+                <TextBlock x:Name="LoadedHeader" Text="IN THE PRINTER" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
+                           Margin="14,9,10,6" />
+
                 <!-- What Load or Unload is doing, how it went, or why it failed. -->
                 <Border x:Name="ActionNote" Background="#1F2A33" CornerRadius="5" Margin="10,0,10,6" Padding="10,7"
                         Visibility="Collapsed">
@@ -248,11 +264,11 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="OpenButton" Grid.Column="2" Style="{StaticResource QuietButton}" Padding="4,1" Margin="6,0,0,0"
-                            Visibility="Collapsed" Click="OnOpenClick" ToolTip="Edit, weigh and add spools in Spoolman">
+                            Visibility="Collapsed" Click="OnOpenClick">
                         <TextBlock Text="Open Spoolman ↗" Foreground="#60CDFF" FontSize="11" />
                     </Button>
                     <Button x:Name="FilterButton" Style="{StaticResource QuietButton}" Width="22" Height="22" Padding="0"
-                            Click="OnFilterClick" ToolTip="Filter by name, material or place">
+                            Click="OnFilterClick" ToolTip="Filter">
                         <Canvas Width="12" Height="12">
                             <Ellipse Canvas.Left="1" Canvas.Top="1" Width="7.5" Height="7.5" Stroke="#9A9A9A" StrokeThickness="1.3" />
                             <Line X1="7.5" Y1="7.5" X2="11.2" Y2="11.2" Stroke="#9A9A9A" StrokeThickness="1.4" />
@@ -263,8 +279,7 @@
                     <TextBox x:Name="FilterBox" Grid.Column="1" Margin="4,0,0,0" Visibility="Collapsed" FontSize="12"
                              Background="#1F1F1F" Foreground="#DADADA" BorderBrush="#3A3A3A" CaretBrush="#DADADA"
                              VerticalContentAlignment="Center" Padding="4,0" MinHeight="0" Height="22"
-                             TextChanged="OnFilterChanged" PreviewKeyDown="OnFilterKey" LostKeyboardFocus="OnFilterLostFocus"
-                             ToolTip="Filter by name, material or place" />
+                             TextChanged="OnFilterChanged" PreviewKeyDown="OnFilterKey" LostKeyboardFocus="OnFilterLostFocus" />
                 </Grid>
                 <TextBlock x:Name="ListNote" Foreground="#8C8C8C" FontSize="12" FontStyle="Italic"
                            TextWrapping="Wrap" Margin="14,2,14,4" Visibility="Collapsed" />

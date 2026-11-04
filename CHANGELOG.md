@@ -23,6 +23,15 @@
 ### Changed
 - Sending G-code and reading what it printed (`Gcode.RunGcodeAsync`, `SendGcodeAsync`) moved out of
   the Spoolman module to `Printers/Gcode.cs`, for any module to use.
+### Changed
+- Spoolman: *Load* and *Unload* moved onto each card in *IN THE PRINTER*, shown when you hover
+  over it, so on several toolheads they act on that card's toolhead. Clicking a card no longer
+  picks a toolhead.
+- Spoolman: on several toolheads, *Use* opens a button for each toolhead (T0, T1, …), and clicking
+  one puts the spool there. While printing, it takes a second click.
+- Spoolman: shorter text throughout ("Spoolman offline", "No spool", "File is ASA, spool is PLA",
+  "Needs 41 g, 269 g spare"). Removed the footer, the note about switching during a print, and the
+  hints about what to click next.
 
 ## [2.15.0] - 2026-11-04
 ### Added

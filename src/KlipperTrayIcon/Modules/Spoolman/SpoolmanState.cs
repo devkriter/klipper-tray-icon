@@ -110,7 +110,7 @@ public static class Spools
         if (state == null)
             return new("—", "");
         if (state.ActiveSpool is not { } spool)
-            return new("—", state.ActiveSpoolId == null ? "none picked" : "");
+            return new("—", state.ActiveSpoolId == null ? "no spool" : "");
         string value = spool.Remaining is double left ? Grams(left) : "?";
         var check = Check(spool, state, state.MultiTool ? state.Tools.Active : -1, status);
         if (Short(spool, check) is double missing)

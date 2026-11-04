@@ -814,8 +814,8 @@ public partial class WebcamPopup : Window
     {
         if (EStopButton.Tag == null)
         {
+            // Same label, filled red: the second click stops the printer.
             EStopButton.Tag = "armed";
-            EStopText.Text = "Click again to E-Stop";
             _estopDisarm.Start();
             return;
         }

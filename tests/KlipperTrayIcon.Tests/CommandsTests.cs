@@ -13,23 +13,26 @@ namespace KlipperTrayIcon.Tests;
 /// <summary>The Console commands module: suggestions, "did you mean", pins and history.</summary>
 public class CommandsTests
 {
-    // As /printer/gcode/help lists them (a macro's name can come in lower case).
+    // As /printer/gcode/help lists them: only commands with a description (macros and extended commands),
+    // so no G28 or M104; a macro's name can come in lower case.
     private static readonly Dictionary<string, string> Help = CommandText.ReadHelp(JsonDocument.Parse("""
-        {"G28":"Move to origin (home)","M104":"Set extruder temperature","M140":"Set bed temperature","M84":"Disable steppers",
-         "BED_MESH_CALIBRATE":"Perform Mesh Bed Leveling","BED_MESH_CLEAR":"Clear the Mesh so no z-adjustment is made",
+        {"BED_MESH_CALIBRATE":"Perform Mesh Bed Leveling","BED_MESH_CLEAR":"Clear the Mesh so no z-adjustment is made",
          "BED_MESH_PROFILE":"Bed Mesh Persistent Storage management","BED_MESH_OUTPUT":"Retrieve interpolated grid of probed points",
          "BED_MESH_MAP":"Serialize mesh and output to terminal","QUAD_GANTRY_LEVEL":"Conform a moving, twistable gantry to the shape of a stationary bed",
          "FIRMWARE_RESTART":"Restart firmware, host, and reload config","RESTART":"Reload config file and restart host software",
-         "print_start":"G-Code macro"}
+         "print_start":"G-Code macro","M117":"Display a message"}
         """).RootElement);
 
     [Fact]
     public void ReadsThePrintersCommands()
     {
-        Assert.Equal(13, Help.Count);
+        Assert.Equal(CommandText.Standard.Count + 9, Help.Count); // M117 is in both
         Assert.Equal("G-Code macro", Help["PRINT_START"]);
-        Assert.Equal("Move to origin (home)", Help["g28"]); // found however it's typed
-        Assert.Empty(CommandText.ReadHelp(default));
+        // Klipper's plain G-codes aren't in its help: they're added, found however they're typed.
+        Assert.Equal("Move to origin (home)", Help["g28"]);
+        Assert.Equal("Set extruder temperature", Help["M104"]);
+        Assert.Equal("Display a message", Help["M117"]); // the printer's own entry wins
+        Assert.Equal(CommandText.Standard.Count, CommandText.ReadHelp(default).Count);
     }
 
     [Fact]
@@ -63,6 +66,11 @@ public class CommandsTests
         Assert.Empty(CommandText.Suggest(Help, "M104 S"));
         Assert.Empty(CommandText.Suggest(Help, ""));
         Assert.Equal(2, CommandText.Suggest(Help, "BED_MESH", max: 2).Count);
+
+        // Plain G-codes, which the printer's help leaves out.
+        Assert.Equal(["G28"], CommandText.Suggest(Help, "g2").Select(s => s.Name));
+        Assert.Equal(["M104", "M105", "M106", "M107", "M109"], CommandText.Suggest(Help, "M10").Select(s => s.Name));
+        Assert.Equal("8", CommandText.Ghost("G2", CommandText.Suggest(Help, "G2")));
     }
 
     [Fact]
@@ -75,6 +83,8 @@ public class CommandsTests
         Assert.Equal("", CommandText.DidYouMean(Help, "HELLO_THERE"));
         // Fine: a command, or part of one, or nothing typed; or the list isn't there yet.
         Assert.Null(CommandText.DidYouMean(Help, "g28"));
+        Assert.Null(CommandText.DidYouMean(Help, "M104 S240"));
+        Assert.Null(CommandText.DidYouMean(Help, "M84"));
         Assert.Null(CommandText.DidYouMean(Help, "BED_M"));
         Assert.Null(CommandText.DidYouMean(Help, " "));
         Assert.Null(CommandText.DidYouMean(new Dictionary<string, string>(), "G2B"));

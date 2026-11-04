@@ -137,10 +137,58 @@ public static class CommandText
         return row[b.Length];
     }
 
-    /// <summary>Moonraker's /printer/gcode/help: every command and macro, by name in capitals, with its description.</summary>
+    /// <summary>
+    /// Klipper's standard G-codes and M-codes (klippy's gcode, gcode_move, toolhead, extruder, heaters,
+    /// fan, idle_timeout, virtual_sdcard, display and so on). /printer/gcode/help leaves them out: it
+    /// only lists commands registered with a description.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> Standard { get; } = new Dictionary<string, string>
+    {
+        ["G0"] = "Move",
+        ["G1"] = "Move",
+        ["G4"] = "Dwell",
+        ["G28"] = "Move to origin (home)",
+        ["G90"] = "Absolute positioning",
+        ["G91"] = "Relative positioning",
+        ["G92"] = "Set position",
+        ["M18"] = "Disable steppers",
+        ["M20"] = "List SD card files",
+        ["M21"] = "Initialize SD card",
+        ["M23"] = "Select SD card file",
+        ["M24"] = "Start or resume SD card print",
+        ["M25"] = "Pause SD card print",
+        ["M26"] = "Set SD card position",
+        ["M27"] = "Report SD card print status",
+        ["M73"] = "Set print progress",
+        ["M82"] = "Absolute extrusion",
+        ["M83"] = "Relative extrusion",
+        ["M84"] = "Disable steppers",
+        ["M104"] = "Set extruder temperature",
+        ["M105"] = "Report temperatures",
+        ["M106"] = "Set fan speed",
+        ["M107"] = "Fan off",
+        ["M109"] = "Set extruder temperature and wait",
+        ["M110"] = "Set line number",
+        ["M112"] = "Emergency stop",
+        ["M114"] = "Report position",
+        ["M115"] = "Report firmware version",
+        ["M117"] = "Show a message on the display",
+        ["M118"] = "Echo a message",
+        ["M140"] = "Set bed temperature",
+        ["M190"] = "Set bed temperature and wait",
+        ["M204"] = "Set acceleration",
+        ["M220"] = "Set speed factor",
+        ["M221"] = "Set extrusion factor",
+        ["M400"] = "Wait for moves to finish",
+    };
+
+    /// <summary>
+    /// Moonraker's /printer/gcode/help: every command and macro, by name in capitals, with its
+    /// description; with Klipper's <see cref="Standard"/> G-codes added (the printer's own entries win).
+    /// </summary>
     public static Dictionary<string, string> ReadHelp(JsonElement result)
     {
-        var help = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var help = new Dictionary<string, string>(Standard, StringComparer.OrdinalIgnoreCase);
         if (result.ValueKind == JsonValueKind.Object)
             foreach (var command in result.EnumerateObject())
                 help[command.Name.ToUpperInvariant()] = command.Value.ValueKind == JsonValueKind.String ? command.Value.GetString()!.Trim() : "";

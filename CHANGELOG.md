@@ -4,7 +4,7 @@
 ### Added
 - *Console commands* module: a box under the console to send G-code. Clicked while empty it
   lists your pinned commands, then your recent ones (the last 100 per printer, kept in
-  `command_history.json`). Typing suggests the printer's commands and macros with their
+  `command_history.json`). Typing suggests the printer's commands and macros (plus Klipper's standard G-codes) with their
   descriptions, matching anywhere in the name; Tab fills in, Enter sends, and Up and Down in the
   empty box step through history. A command the printer doesn't know gets "Did you mean G28?".
   While printing or paused, every command needs a second click or Enter ("Send anyway"). When

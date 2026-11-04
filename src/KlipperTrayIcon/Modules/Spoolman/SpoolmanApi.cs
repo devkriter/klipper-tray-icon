@@ -370,35 +370,66 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     }
 
     /// <summary>
-    /// Runs G-code (a load or unload macro) and waits until it's done: heating can take minutes. Throws
-    /// <see cref="GcodeException"/> with Klipper's message if it fails.
+    /// Runs G-code (a load or unload macro) and waits until it's done: heating can take minutes. It's
+    /// judged by what it printed in the console while it ran, too: macros often report a failure with
+    /// RESPOND TYPE=error ("!! …") rather than an error. Throws <see cref="GcodeException"/> with that
+    /// message if it fails; otherwise returns its last message (RESPOND MSG="…"), or null.
     /// </summary>
-    public async Task RunGcodeAsync(string script, CancellationToken ct)
+    public async Task<string?> RunGcodeAsync(string script, CancellationToken ct)
     {
+        // Where the console is now: the run's own lines come after it.
+        double? mark = null;
+        try { mark = (await ConsoleAsync(1, ct)).Select(e => e.Time).DefaultIfEmpty(0).Max(); }
+        catch (Exception) when (!ct.IsCancellationRequested) { } // can't tell what it said, then
+        bool refused = false;
         try
         {
             using var _ = await printer.PostJsonAsync("/printer/gcode/script?script=" + Uri.EscapeDataString(script), null, ct,
                                                       TimeSpan.FromMinutes(10));
         }
-        catch (MoonrakerHttpException e) when ((int)e.StatusCode == 400)
+        // The answer's body isn't passed on; Klipper's error is in the console.
+        catch (MoonrakerHttpException e) when ((int)e.StatusCode == 400) { refused = true; }
+        (string? error, string? message) = (null, null);
+        if (mark != null || refused)
         {
-            // The answer's body isn't passed on; Klipper's error is the last "!!" line in the console.
-            string message = "";
-            try
-            {
-                using var store = await printer.GetJsonAsync("/server/gcode_store?count=20", ct, TimeSpan.FromSeconds(3));
-                message = LastError(store.RootElement.Prop("result").Prop("gcode_store"));
-            }
+            try { (error, message) = Said(await ConsoleAsync(100, ct), mark); }
             catch (Exception) when (!ct.IsCancellationRequested) { }
-            throw new GcodeException(message.Length > 0 ? message : $"{script} failed");
         }
+        if (refused || error != null)
+            throw new GcodeException(error ?? $"{script} failed");
+        return message;
     }
 
-    /// <summary>The last error in the console, its first line ("!! Must home axis first" → "Must home axis first"), or "".</summary>
-    internal static string LastError(JsonElement store) =>
-        store.ValueKind != JsonValueKind.Array ? ""
-        : store.EnumerateArray().Select(e => e.Str("message").Trim())
-               .LastOrDefault(m => m.StartsWith("!!", StringComparison.Ordinal))?.TrimStart('!', ' ').Split('\n')[0].Trim() ?? "";
+    private async Task<List<(string Message, double Time)>> ConsoleAsync(int count, CancellationToken ct)
+    {
+        using var doc = await printer.GetJsonAsync($"/server/gcode_store?count={count}", ct, TimeSpan.FromSeconds(3));
+        var store = doc.RootElement.Prop("result").Prop("gcode_store");
+        return store.ValueKind != JsonValueKind.Array ? []
+            : store.EnumerateArray().Select(e => (e.Str("message"), e.Num("time"))).ToList();
+    }
+
+    /// <summary>
+    /// What G-code said in the console after the mark (all of it without one): its last error, first
+    /// line only ("!! Must home axis first" → "Must home axis first"), and its last other message
+    /// ("echo: Filament free: pull it out" → "Filament free: pull it out"); null for none.
+    /// </summary>
+    internal static (string? Error, string? Message) Said(IEnumerable<(string Message, double Time)> console, double? mark)
+    {
+        string? error = null, message = null;
+        foreach (var (text, time) in console)
+        {
+            if (mark is double since && time <= since)
+                continue;
+            string line = text.Trim().Split('\n')[0].Trim();
+            if (line.StartsWith("!!", StringComparison.Ordinal))
+                error = line.TrimStart('!', ' ');
+            else if (line.StartsWith("echo:", StringComparison.Ordinal))
+                message = line["echo:".Length..].Trim();
+            else if (line.StartsWith("//", StringComparison.Ordinal))
+                message = line.TrimStart('/', ' ');
+        }
+        return (error is { Length: > 0 } ? error : null, message is { Length: > 0 } ? message : null);
+    }
 
     /// <summary>A request to Spoolman through Moonraker. Throws <see cref="SpoolmanException"/> if Spoolman says no.</summary>
     private async Task<JsonDocument> ProxyAsync(string method, string path, string query, CancellationToken ct)

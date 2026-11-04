@@ -615,7 +615,8 @@ public partial class SpoolmanPanel : ModulePanel
         ShowNote($"{(load ? "Loading" : "Unloading")}{where}… The printer heats up first, so this can take a few minutes.", warn: false);
         try
         {
-            await _source.Api.RunGcodeAsync(script, _lifetime);
+            // Its own last word, e.g. "Filament free: pull it out".
+            string said = await _source.Api.RunGcodeAsync(script, _lifetime) is { } message ? " " + Sentence(message) : "";
             try
             {
                 if (!load && tool != null)
@@ -627,8 +628,8 @@ public partial class SpoolmanPanel : ModulePanel
                     await _source.Api.SetActiveSpoolAsync(id, _lifetime);
                 var spool = tool?.SpoolId is int loaded ? state.Spools.GetValueOrDefault(loaded) : tool == null ? state.ActiveSpool : null;
                 ShowNote(load
-                    ? spool != null ? $"Loaded {spool.Title}{where}." : $"Loaded{where}. Pick its spool below with Use, so its usage is counted."
-                    : $"Unloaded{where}. Pick the next spool below with Use, then Load.", warn: false);
+                    ? spool != null ? $"Loaded {spool.Title}{where}.{said}" : $"Loaded{where}.{said} Pick its spool below with Use, so its usage is counted."
+                    : $"Unloaded{where}.{said} Pick the next spool below with Use, then Load.", warn: false);
             }
             catch (Exception ex) when (!_lifetime.IsCancellationRequested)
             {
@@ -649,6 +650,10 @@ public partial class SpoolmanPanel : ModulePanel
         await Task.Delay(300);
         _fresh = _wake = _listWake = true;
     }
+
+    /// <summary>A macro's message as a sentence: "Filament free: pull it out" → "Filament free: pull it out.".</summary>
+    internal static string Sentence(string message) =>
+        message.Length > 0 && !".!?".Contains(message[^1]) ? message + "." : message;
 
     private void ShowNote(string text, bool warn)
     {

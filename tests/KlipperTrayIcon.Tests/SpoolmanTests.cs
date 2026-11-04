@@ -37,9 +37,12 @@ public class SpoolmanTests
         public bool SpoolmanUp = true;
         public string Objects = """["toolhead","extruder","heater_bed","gcode_macro PRINT_START"]""";
         public string Query = """{"toolhead":{"extruder":"extruder"}}""";
-        // Klipper's config, for the macros' G-code; and G-code that fails, with what the console says then.
+        // Klipper's config, for the macros' G-code.
         public string ConfigSettings = "{}";
-        public string? FailingScript;
+        // The console, oldest first, with an error from before; and what scripts print when run (and whether
+        // Moonraker answers 400, as for action_raise_error).
+        public readonly List<(string Message, double Time)> Console = [("!! Must home axis first", 1), ("ok", 2)];
+        public readonly Dictionary<string, (bool Refused, string[] Says)> Scripts = new();
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -47,19 +50,24 @@ public class SpoolmanTests
             string path = Uri.UnescapeDataString(request.RequestUri!.PathAndQuery);
             lock (Requests)
                 Requests.Add($"{request.Method} {path}{(body.Length > 0 ? " " + body : "")}");
-            if (FailingScript != null && path == "/printer/gcode/script?script=" + FailingScript)
-                return new HttpResponseMessage(HttpStatusCode.BadRequest)
-                {
-                    Content = new StringContent("""{"error":{"code":400,"message":"Extrude below minimum temp"}}"""),
-                };
+            const string script = "/printer/gcode/script?script=";
+            if (path.StartsWith(script) && Scripts.TryGetValue(path[script.Length..], out var run))
+            {
+                Console.Add((path[script.Length..], Console[^1].Time + 1));
+                foreach (string line in run.Says)
+                    Console.Add((line, Console[^1].Time + 1));
+                if (run.Refused)
+                    return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                    {
+                        Content = new StringContent("""{"error":{"code":400,"message":"Extrude below minimum temp"}}"""),
+                    };
+            }
             string? json = path switch
             {
-                "/server/gcode_store?count=20" => """
-                    {"result":{"gcode_store":[{"message":"!! Must home axis first","time":1,"type":"response"},
-                     {"message":"UNLOAD_FILAMENT","time":2,"type":"command"},
-                     {"message":"!! Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details","time":3,"type":"response"},
-                     {"message":"ok","time":4,"type":"response"}]}}
-                    """,
+                _ when path.StartsWith("/server/gcode_store?count=") =>
+                    """{"result":{"gcode_store":""" + JsonSerializer.Serialize(
+                        Console.TakeLast(int.Parse(path["/server/gcode_store?count=".Length..]))
+                               .Select(c => new { message = c.Message, time = c.Time, type = "response" })) + "}}",
                 "/printer/objects/query?configfile=settings" => """{"result":{"status":{"configfile":{"settings":""" + ConfigSettings + "}}}}",
                 "/server/info" => """{"result":{"components":["file_manager","spoolman","history"]}}""",
                 "/server/spoolman/status" => SpoolmanUp
@@ -479,13 +487,33 @@ public class SpoolmanTests
     public async Task RunsAMacroAndSaysWhyItFailed()
     {
         var (api, printer) = Make();
-        await api.RunGcodeAsync("LOAD_FILAMENT TOOL=1", default);
+        // Says nothing: no message, and the old error in the console isn't this run's.
+        Assert.Null(await api.RunGcodeAsync("LOAD_FILAMENT TOOL=1", default));
         Assert.Contains("POST /printer/gcode/script?script=LOAD_FILAMENT TOOL=1", printer.Requests);
 
-        // Klipper's error is the last "!!" in the console.
-        printer.FailingScript = "UNLOAD_FILAMENT";
-        var e = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT", default));
-        Assert.Equal("Extrude below minimum temp", e.Message);
+        // Its last message (RESPOND MSG="…").
+        printer.Scripts["LOAD_FILAMENT"] = (false, ["echo: Gears turning to grab the filament", "ok", "echo: Filament loaded at 240°C", "ok"]);
+        Assert.Equal("Filament loaded at 240°C", await api.RunGcodeAsync("LOAD_FILAMENT", default));
+
+        // A failure reported with RESPOND TYPE=error: Moonraker answers 200, the console says "!!".
+        printer.Scripts["UNLOAD_FILAMENT"] = (false, ["echo: Pulling", "!! FS_POST still sees filament after the full pull: tip stuck in the hotend", "ok"]);
+        var stuck = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT", default));
+        Assert.Equal("FS_POST still sees filament after the full pull: tip stuck in the hotend", stuck.Message);
+
+        // An error raised (400): Klipper's message is this run's "!!", its first line.
+        printer.Scripts["UNLOAD_FILAMENT T=1"] = (true, ["!! Extrude below minimum temp\nSee the 'min_extrude_temp' config option for details"]);
+        var cold = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=1", default));
+        Assert.Equal("Extrude below minimum temp", cold.Message);
+        // Raised without a word in the console: not an older error.
+        printer.Scripts["UNLOAD_FILAMENT T=2"] = (true, []);
+        var quiet = await Assert.ThrowsAsync<GcodeException>(() => api.RunGcodeAsync("UNLOAD_FILAMENT T=2", default));
+        Assert.Equal("UNLOAD_FILAMENT T=2 failed", quiet.Message);
+
+        // A plain message that it had nothing to do isn't a failure.
+        printer.Scripts["UNLOAD_FILAMENT T=3"] = (false, ["// No filament in the toolhead: nothing to unload"]);
+        Assert.Equal("No filament in the toolhead: nothing to unload", await api.RunGcodeAsync("UNLOAD_FILAMENT T=3", default));
+        Assert.Equal("Filament free: pull it out.", SpoolmanPanel.Sentence("Filament free: pull it out"));
+        Assert.Equal("Done!", SpoolmanPanel.Sentence("Done!"));
 
         // Taking a tool's spool out.
         await api.SetToolSpoolAsync("T1", null, active: true, default);

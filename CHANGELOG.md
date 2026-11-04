@@ -7,7 +7,10 @@
   *Unload* also takes the spool out in Spoolman, so you pick the next one with *Use* and then
   *Load* it. On printers with several toolheads they act on the toolhead picked, with its own
   `LOAD_FILAMENT_T1` macro, or with the plain macro's `TOOL`, `T` or `EXTRUDER` parameter if it
-  reads one. If a macro fails, the page says why ("Couldn't unload: Extrude below minimum temp").
+  reads one. If a macro fails, the page says why ("Couldn't unload: Extrude below minimum temp"),
+  and the spool stays. That includes a macro that only reports the failure in the console
+  (`RESPOND TYPE=error`). When it works, the page shows the macro's last message ("Unloaded.
+  Filament free: pull it out.").
 - Spoolman: which macros *Load* and *Unload* run is a setting, a dropdown of the printer's macros
   that also takes your own command (`{tool}` is the toolhead's number).
 - Modules can have text settings (`ModuleSetting.ForText`), shown as a dropdown when the module

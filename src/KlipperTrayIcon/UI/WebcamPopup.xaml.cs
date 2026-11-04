@@ -77,14 +77,17 @@ public partial class WebcamPopup : Window
 
     /// <param name="modules">Enabled modules: each gets a panel, beside the console.</param>
     /// <param name="moduleSettings">Each module's saved settings (by module id).</param>
+    /// <param name="moduleTextSettings">Each module's saved text settings (by module id).</param>
     public WebcamPopup(IPrinterBackend backend, bool showConsole, IReadOnlyList<IModule>? modules = null, bool showStats = true,
-                       IReadOnlyDictionary<string, Dictionary<string, double>>? moduleSettings = null)
+                       IReadOnlyDictionary<string, Dictionary<string, double>>? moduleSettings = null,
+                       IReadOnlyDictionary<string, Dictionary<string, string>>? moduleTextSettings = null)
     {
         InitializeComponent();
         _backend = backend;
         modules ??= [];
         _modules = modules;
         _moduleSettings = moduleSettings ?? new Dictionary<string, Dictionary<string, double>>();
+        _moduleTextSettings = moduleTextSettings ?? new Dictionary<string, Dictionary<string, string>>();
         _showPanel = showConsole || modules.Count > 0;
         _showStats = showStats;
         if (!showStats)
@@ -446,8 +449,10 @@ public partial class WebcamPopup : Window
     // The modules turned on, and the tiles made for the strip from them (null: it failed), by key.
     private readonly IReadOnlyList<IModule> _modules;
     private readonly IReadOnlyDictionary<string, Dictionary<string, double>> _moduleSettings;
+    private readonly IReadOnlyDictionary<string, Dictionary<string, string>> _moduleTextSettings;
 
-    private ModuleContext Context(IModule module) => new(_backend, _lifetime.Token, _moduleSettings.GetValueOrDefault(module.Id));
+    private ModuleContext Context(IModule module) => new(_backend, _lifetime.Token, _moduleSettings.GetValueOrDefault(module.Id),
+                                                         _moduleTextSettings.GetValueOrDefault(module.Id));
     private readonly Dictionary<string, ModuleTile?> _moduleTiles = new();
     private PrinterStatus _lastStatus = PrinterStatus.Connecting;
     private bool _stripDue;

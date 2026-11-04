@@ -86,6 +86,26 @@ public class ModuleTests
     }
 
     [Fact]
+    public void TextSettingsAreSavedAndReadBack()
+    {
+        var macro = ModuleSetting.ForText("load_macro", "Load macro", "LOAD_FILAMENT");
+        Assert.True(macro.IsText);
+        Assert.False(new ModuleSetting("low", "Low below", 100).IsText);
+        var context = new ModuleContext(new MoonrakerBackend("http://p"), default);
+        Assert.Equal("LOAD_FILAMENT", context.Text(macro));
+        Assert.Equal("MMU_LOAD", (context with { SavedText = new Dictionary<string, string> { ["load_macro"] = " MMU_LOAD " } }).Text(macro));
+        // Emptied: the default again.
+        Assert.Equal("LOAD_FILAMENT", macro.TextIn(new Dictionary<string, string> { ["load_macro"] = "  " }));
+
+        var config = JsonSerializer.Deserialize<AppConfig>("""{"module_text_settings":{"spoolman":{"load_macro":"MMU_LOAD"}}}""",
+                                                           ConfigStore.JsonOptions)!;
+        Assert.Equal("MMU_LOAD", config.Clone().ModuleTextSettings["spoolman"]["load_macro"]);
+        var spoolman = ModuleRegistry.All.Single(m => m.Id == "spoolman");
+        Assert.Equal("MMU_LOAD", ModuleRegistry.SavedTextSettings(config, spoolman)!["load_macro"]);
+        Assert.Null(ModuleRegistry.SavedTextSettings(new AppConfig(), spoolman));
+    }
+
+    [Fact]
     public void TheQueueTile()
     {
         Assert.Equal(new StatusText.Tile("—", ""), QueueTile.Describe(null));

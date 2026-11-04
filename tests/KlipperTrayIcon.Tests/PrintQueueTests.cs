@@ -150,6 +150,17 @@ public class PrintQueueTests
     }
 
     [Fact]
+    public async Task EmergencyStopIsMoonrakersOwnCall()
+    {
+        var (backend, printer) = MakePrinter();
+        Assert.True(((IPrinterBackend)backend).SupportsEmergencyStop);
+        await backend.EmergencyStopAsync(default);
+        Assert.Equal(["POST /printer/emergency_stop"], printer.Requests); // not M112 through a script
+        using var bambu = new BambuBackend("1.2.3.4", "S", "C");
+        Assert.False(((IPrinterBackend)bambu).SupportsEmergencyStop);
+    }
+
+    [Fact]
     public async Task FailedChangesThrow()
     {
         var queue = new PrintQueueApi(new MoonrakerBackend("p", http: new HttpClient(new Refusing())));

@@ -46,6 +46,10 @@ public interface IPrinterBackend : IDisposable
     Task<ConsoleFilter> GetConsoleFilterAsync(CancellationToken ct) => Task.FromResult(ConsoleFilter.None);
     /// <summary>Restarts Klipper after it shut down (FIRMWARE_RESTART). Throws if it can't.</summary>
     Task RestartKlipperAsync(CancellationToken ct) => throw new NotSupportedException();
+    /// <summary>Whether it has an emergency stop (Klipper's), for the popup's E-Stop button.</summary>
+    bool SupportsEmergencyStop => false;
+    /// <summary>Stops the printer at once: heaters and motors off, Klipper shut down. Throws if it can't.</summary>
+    Task EmergencyStopAsync(CancellationToken ct) => throw new NotSupportedException();
     /// <summary>Human-readable reason for an exception thrown by this backend.</summary>
     string DescribeError(Exception e);
 }

@@ -126,6 +126,12 @@ public partial class WebcamPopup : Window
         VideoImage.MouseMove += OnTouchMove;
         VideoImage.MouseLeftButtonUp += (_, _) => EndTouch();
         VideoImage.LostMouseCapture += (_, _) => EndTouch();
+        if (backend.SupportsEmergencyStop)
+        {
+            VideoArea.MouseEnter += (_, _) => ShowEStop(true);
+            VideoArea.MouseLeave += (_, _) => ShowEStop(false);
+            _estopDisarm.Tick += (_, _) => DisarmEStop();
+        }
         _ = Task.Run(() => TouchLoopAsync(_lifetime.Token));
 
         Activated += (_, _) => _activatedAt = Environment.TickCount64;
@@ -307,6 +313,7 @@ public partial class WebcamPopup : Window
             return;
         EndTouch();
         LockTouch();
+        ShowEStop(false);
         _hiddenAt = DateTime.UtcNow;
         Hide();
         _console?.Pause();
@@ -838,6 +845,48 @@ public partial class WebcamPopup : Window
     {
         BadgeText.Text = text ?? "";
         Badge.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    // ---- emergency stop ----------------------------------------------------------
+
+    // Armed by the first click: a second one within this long stops the printer.
+    private readonly DispatcherTimer _estopDisarm = new() { Interval = TimeSpan.FromSeconds(3) };
+
+    /// <summary>The mouse came over the video (true) or left it: the button shows, or hides and disarms.</summary>
+    private void ShowEStop(bool over)
+    {
+        if (!_backend.SupportsEmergencyStop)
+            return;
+        if (!over)
+            DisarmEStop();
+        EStopButton.Visibility = over ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void OnEStopClick(object sender, RoutedEventArgs e)
+    {
+        if (EStopButton.Tag == null)
+        {
+            // Same label, filled red: the second click stops the printer.
+            EStopButton.Tag = "armed";
+            _estopDisarm.Start();
+            return;
+        }
+        DisarmEStop();
+        try { await Task.Run(() => _backend.EmergencyStopAsync(_lifetime.Token)); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            App.LogError("Emergency stop", ex);
+            EStopText.Text = "E-Stop failed";
+            _estopDisarm.Start(); // back to rest after a moment
+        }
+    }
+
+    private void DisarmEStop()
+    {
+        _estopDisarm.Stop();
+        EStopButton.Tag = null;
+        EStopText.Text = "E-Stop";
     }
 
     // ---- touch -----------------------------------------------------------------

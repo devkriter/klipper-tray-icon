@@ -11,6 +11,11 @@
   Klipper has shut down it offers `FIRMWARE_RESTART` and `RESTART`. Pins are a list in the
   module's settings, one `Name: command` per line, where `{240}` asks for a value; right-click a
   recent command to pin it, or a pin to unpin it.
+- An *E-Stop* button over the top-right corner of the webcam view (Klipper printers). It shows
+  only while the mouse is over the video. The first click arms it (it turns solid red); a
+  second click within 3 seconds sends Moonraker's emergency stop
+  (`/printer/emergency_stop`), which gets through even while the printer is busy. Leaving the
+  video disarms it.
 - Modules can add a control under the console (`IModule.CreateConsoleInput`), have text settings
   of several lines (`ModuleSetting.ForText(..., lines: 6)`) and save a text setting from the popup
   (`ModuleContext.SaveText`). A module no longer needs a panel of its own.

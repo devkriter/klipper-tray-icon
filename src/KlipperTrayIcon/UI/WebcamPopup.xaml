@@ -58,6 +58,37 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- E-Stop: small and dim over the video; solid red while it waits for the second click (Tag "armed"). -->
+        <Style x:Key="EStop" TargetType="Button">
+            <Setter Property="Foreground" Value="#FF9A93" />
+            <Setter Property="Background" Value="#8C000000" />
+            <Setter Property="BorderBrush" Value="#59FF7B72" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="9,0">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#CC000000" />
+                            </Trigger>
+                            <Trigger Property="Tag" Value="armed">
+                                <Setter TargetName="Bg" Property="Background" Value="#DA3633" />
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#DA3633" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border x:Name="Frame" BorderBrush="#404040" BorderThickness="1">
@@ -107,7 +138,7 @@
             </Grid.RowDefinitions>
 
             <!-- Video -->
-            <Grid Background="Black" ClipToBounds="True">
+            <Grid x:Name="VideoArea" Background="Black" ClipToBounds="True">
                 <Image x:Name="VideoImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
                 <!-- While touch is unlocked: clicks on the picture go to the printer. -->
                 <Border x:Name="TouchOutline" BorderBrush="#E3B341" BorderThickness="2" IsHitTestVisible="False"
@@ -125,6 +156,17 @@
                         HorizontalAlignment="Left" VerticalAlignment="Bottom" Visibility="Collapsed">
                     <TextBlock x:Name="BadgeText" Foreground="#D8D8D8" FontSize="11" />
                 </Border>
+                <!-- Klipper's emergency stop, top right, only while the mouse is over the video. The first
+                     click arms it (solid red); a second within 3 s stops the printer. -->
+                <Button x:Name="EStopButton" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10"
+                        Visibility="Collapsed" Style="{StaticResource EStop}" Click="OnEStopClick">
+                    <StackPanel Orientation="Horizontal">
+                        <Path Data="M2.5,0.3 L7.5,0.3 L10,5 L7.5,9.7 L2.5,9.7 L0,5 Z" Width="10" Height="10"
+                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBlock x:Name="EStopText" Text="E-Stop" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </Grid>
 
             <!-- Klipper console -->

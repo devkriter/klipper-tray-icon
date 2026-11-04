@@ -362,7 +362,7 @@ public class SpoolmanTests
         var idle = new PrinterStatus("standby", 0);
         Assert.Equal(new StatusText.Tile("—", ""), Spools.Tile(null, idle, Levels.Default));
         var none = new SpoolmanState(new SpoolmanStatus(true, 0, null), ToolSpools.None, new Dictionary<int, Spool>(), FileFilament.None);
-        Assert.Equal(new StatusText.Tile("—", "none picked"), Spools.Tile(none, idle, Levels.Default));
+        Assert.Equal(new StatusText.Tile("—", "no spool"), Spools.Tile(none, idle, Levels.Default));
 
         var asa = Spool(7, "ASA", 310);
         Assert.Equal(new StatusText.Tile("310 g", "ASA · 31%"), Spools.Tile(State(FileFilament.None, asa), idle, Levels.Default));

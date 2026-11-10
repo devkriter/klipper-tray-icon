@@ -49,7 +49,7 @@ public class ModuleTests
                 Assert.True(tile.Label.Length <= 12, $"{key}'s label is too long for a tile");
                 Assert.NotNull(module.CreateTile(tile.Id, new ModuleContext(new MoonrakerBackend("http://p"), default)));
             }
-        Assert.Equal(["print_queue:queue", "spoolman:spool"], keys);
+        Assert.Equal(["print_queue:queue", "spoolman:spool", "afc:lane"], keys);
         Assert.Null(ModuleRegistry.FindTile("print_queue:nope"));
         Assert.Null(ModuleRegistry.FindTile("from_a_newer_version:tile"));
         Assert.Null(ModuleRegistry.FindTile(StatusText.Nozzle));

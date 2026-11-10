@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 ### Added
+- *AFC* module, for Armored Turtle's AFC filament changers (Box Turtle, NightOwl and other AFC
+  units): a page that draws the unit, from each lane's spool through its Prep and Load sensors,
+  the hub and the buffer to the toolhead's Pre and Post sensors. The path is drawn in the colour
+  of the filament in it and sensors turn green when they see filament; an empty lane is dashed,
+  and a bypass branch shows on printers with a bypass sensor. The header shows the unit's name and
+  what AFC is doing ("Change 3 of 12 · Loading T1" in a print); AFC's error shows in amber with the
+  sensor it's about ringed, and *Resume* (`AFC_RESUME`). Hovering a lane shows *Load* and *Eject*,
+  hovering the toolhead *Unload*, each after a second click and not while printing. Refreshed once a
+  second while the page shows. Adds an optional LANE tile: the tool in use and its filament.
 - Spoolman: AFC filament changers (Box Turtle, NightOwl). Each lane is a card named by its tool
   (T0, T1), with its spool, and the lane in the toolhead is in use. Picking a spool for a lane sets
   AFC's spool for it; *Load* switches the toolhead to that lane (`CHANGE_TOOL`), *Unload* takes the

@@ -15,6 +15,7 @@ public static class ModuleRegistry
         new PrintQueue.PrintQueueModule(),
         new Spoolman.SpoolmanModule(),
         new Commands.CommandsModule(),
+        new Afc.AfcModule(),
     ];
 
     /// <summary>The modules the user turned on that work with this printer, in <see cref="All"/>'s order.</summary>

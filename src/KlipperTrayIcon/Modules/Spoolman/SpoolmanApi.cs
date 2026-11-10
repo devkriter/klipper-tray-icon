@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using KlipperTrayIcon.Modules.Afc;
 using KlipperTrayIcon.Printers;
 
 namespace KlipperTrayIcon.Modules.Spoolman;
@@ -66,9 +67,9 @@ public sealed record Tool(string Name, int? SpoolId, string? Lane = null, bool F
     /// out of the toolhead if it's the one in use, else ejected so the spool can come off.
     /// </summary>
     public string? LaneScript(bool load, bool inUse) => Lane == null ? null
-        : load ? $"CHANGE_TOOL LANE={Lane}"
-        : inUse ? $"TOOL_UNLOAD LANE={Lane}"
-        : $"LANE_UNLOAD LANE={Lane}";
+        : load ? AfcApi.LoadScript(Lane)
+        : inUse ? AfcApi.UnloadScript(Lane)
+        : AfcApi.EjectScript(Lane);
 }
 
 /// <summary>
@@ -408,7 +409,7 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
             return;
         }
         // AFC keeps the lane's spool (and takes its colour and material from Spoolman).
-        string script = $"SET_SPOOL_ID LANE={tool.Lane} SPOOL_ID={(id is int n ? n.ToString(CultureInfo.InvariantCulture) : "")}";
+        string script = AfcApi.SpoolScript(tool.Lane, id);
         await printer.SendAsync(HttpMethod.Post, "/printer/gcode/script?script=" + Uri.EscapeDataString(script), null, ct);
         if (active)
             await SetActiveSpoolAsync(id, ct);

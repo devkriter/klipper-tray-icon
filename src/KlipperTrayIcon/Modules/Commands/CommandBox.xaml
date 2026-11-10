@@ -4,7 +4,7 @@
                             xmlns:modules="clr-namespace:KlipperTrayIcon.Modules">
     <!-- A box under the console to type commands in, with a dropdown over the console's last lines. -->
     <modules:ModuleConsoleInput.Resources>
-        <!-- Send: small and quiet, like Spoolman's Use. Filled blue while it asks for the second click (Tag "armed"). -->
+        <!-- Send: small and quiet, like Spoolman's Use. Amber while it asks for the second click (Tag "armed"). -->
         <Style x:Key="SendButton" TargetType="Button">
             <Setter Property="Foreground" Value="#DADADA" />
             <Setter Property="Background" Value="#262626" />
@@ -25,9 +25,9 @@
                                 <Setter TargetName="Bg" Property="Opacity" Value="0.85" />
                             </Trigger>
                             <Trigger Property="Tag" Value="armed">
-                                <Setter TargetName="Bg" Property="Background" Value="#60CDFF" />
-                                <Setter TargetName="Bg" Property="BorderBrush" Value="#60CDFF" />
-                                <Setter Property="Foreground" Value="#002033" />
+                                <Setter TargetName="Bg" Property="Background" Value="#E3B341" />
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#E3B341" />
+                                <Setter Property="Foreground" Value="Black" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">

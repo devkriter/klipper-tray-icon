@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+### Added
+- Spoolman: AFC filament changers (Box Turtle, NightOwl). Each lane is a card named by its tool
+  (T0, T1), with its spool, and the lane in the toolhead is in use. Picking a spool for a lane sets
+  AFC's spool for it; *Load* switches the toolhead to that lane (`CHANGE_TOOL`), *Unload* takes the
+  loaded lane out of the toolhead (`TOOL_UNLOAD`) or ejects another lane (`LANE_UNLOAD`).
+
+### Changed
+- Buttons waiting for a second click turn amber, as *Start next* does (E-Stop stays red).
+- The line above the console box, and Spoolman's Load and Unload messages, clear after a few seconds.
+
 ## [2.16.0] - 2026-11-04
 ### Added
 - *Console commands* module: a box under the console to send G-code. Clicked while empty it

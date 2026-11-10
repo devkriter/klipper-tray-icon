@@ -300,7 +300,7 @@ public partial class SpoolmanPanel : ModulePanel
         {
             Add(grid, Ring(spool, 26, CardBrush), 1, 0, margin: new Thickness(0, 0, 9, 0));
             words.Children.Add(Text(spool.Title, 12.5, TextBrush, bold: true));
-            words.Children.Add(Text(Join(inUse ? "In use" : "", spool.Material, spool.Fraction is double f ? Spools.Percent(f) : "",
+            words.Children.Add(Text(Join(inUse ? "In use" : tool.Filament ? "" : "Empty", spool.Material, spool.Fraction is double f ? Spools.Percent(f) : "",
                                          spool.Location), 11, DimBrush));
             var check = Spools.Check(spool, state, index, _status);
             var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -591,7 +591,7 @@ public partial class SpoolmanPanel : ModulePanel
         try
         {
             if (tool >= 0 && tool < state.Tools.Tools.Count)
-                await _source.Api.SetToolSpoolAsync(state.Tools.Tools[tool].Name, spoolId,
+                await _source.Api.SetToolSpoolAsync(state.Tools.Tools[tool], spoolId,
                                                     tool == state.Tools.Active || !state.MultiTool, _lifetime);
             else
                 await _source.Api.SetActiveSpoolAsync(spoolId, _lifetime);
@@ -623,8 +623,10 @@ public partial class SpoolmanPanel : ModulePanel
         int number = tool != null && int.TryParse(tool.Name.AsSpan(1), out int n) ? n : -1;
         string chosen = load ? _loadMacro : _unloadMacro;
         bool own = !chosen.Equals(name, StringComparison.OrdinalIgnoreCase);
-        string? script = _macros.Script(load, number, inUse, chosen);
-        string? why = script != null ? null
+        string? script = tool?.Lane != null ? tool.LaneScript(load, inUse) : _macros.Script(load, number, inUse, chosen);
+        string? why = tool?.Lane != null
+            ? (load && inUse ? "Loaded" : !tool.Filament ? "No filament" : null)
+            : script != null ? null
             : own || _macros.Macros.Contains(name) ? "Active toolhead only"
             : $"No {name} macro";
         // Paused is fine: that's when a print's filament is changed.
@@ -658,15 +660,21 @@ public partial class SpoolmanPanel : ModulePanel
         {
             // Its own last word, e.g. "Filament free: pull it out".
             string said = await ((IMoonrakerApi)_printer).RunGcodeAsync(script, _lifetime) is { } message ? " " + Sentence(message) : "";
-            // Spoolman follows: the toolhead's spool out after Unload, and in use after Load.
+            // Spoolman follows: the toolhead's spool out after Unload, and in use after Load. A lane keeps
+            // its spool (AFC forgets an ejected one itself); only the one Moonraker counts changes.
             try
             {
-                if (!load && tool != null)
+                if (!load && tool?.Lane != null)
+                {
+                    if (inUse)
+                        await _source.Api.SetActiveSpoolAsync(null, _lifetime);
+                }
+                else if (!load && tool != null)
                     await _source.Api.SetToolSpoolAsync(tool.Name, null, inUse, _lifetime);
                 else if (!load)
                     await _source.Api.SetActiveSpoolAsync(null, _lifetime);
                 // The tool's spool is the one Moonraker counts, if it's the tool in use.
-                else if (tool?.SpoolId is int id && inUse && state.Status.ActiveSpoolId != id)
+                else if (tool?.SpoolId is int id && (inUse || tool.Lane != null) && state.Status.ActiveSpoolId != id)
                     await _source.Api.SetActiveSpoolAsync(id, _lifetime);
                 ShowNote($"{(load ? "Loaded" : "Unloaded")}{where}.{said}", warn: false);
             }
@@ -694,12 +702,23 @@ public partial class SpoolmanPanel : ModulePanel
     internal static string Sentence(string message) =>
         message.Length > 0 && !".!?".Contains(message[^1]) ? message + "." : message;
 
+    // Load and Unload's last word goes after a while (an error a little later).
+    private DispatcherTimer? _noteFade;
+
     private void ShowNote(string text, bool warn)
     {
         ActionText.Text = text;
         ActionText.Foreground = warn ? WarnText : NoteText;
         ActionNote.Background = warn ? WarnBack : NoteBack;
         ActionNote.Visibility = Visibility.Visible;
+        _noteFade?.Stop();
+        _noteFade = new DispatcherTimer { Interval = TimeSpan.FromSeconds(warn ? 15 : 8) };
+        _noteFade.Tick += (_, _) =>
+        {
+            _noteFade?.Stop();
+            ActionNote.Visibility = Visibility.Collapsed;
+        };
+        _noteFade.Start();
     }
 
     /// <summary>

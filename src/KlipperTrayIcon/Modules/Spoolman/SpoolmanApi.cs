@@ -54,8 +54,22 @@ public sealed record Spool(
 /// <summary>Moonraker's link to Spoolman: whether it's up, reports waiting for it, and the spool it counts usage for.</summary>
 public sealed record SpoolmanStatus(bool Connected, int PendingReports, int? ActiveSpoolId);
 
-/// <summary>A toolhead with a spool_id variable on its macro (T0, T1, …), as Mainsail and Fluidd use them.</summary>
-public sealed record Tool(string Name, int? SpoolId);
+/// <summary>
+/// A toolhead with a spool_id variable on its macro (T0, T1, …), as Mainsail and Fluidd use them; or a
+/// lane of an AFC filament changer (Box Turtle, NightOwl), named by the tool it maps to, with Lane its
+/// AFC name ("lane1") and Filament whether filament is in it.
+/// </summary>
+public sealed record Tool(string Name, int? SpoolId, string? Lane = null, bool Filament = true)
+{
+    /// <summary>
+    /// The G-code that loads a lane into the toolhead (unloading the one there first), or unloads it:
+    /// out of the toolhead if it's the one in use, else ejected so the spool can come off.
+    /// </summary>
+    public string? LaneScript(bool load, bool inUse) => Lane == null ? null
+        : load ? $"CHANGE_TOOL LANE={Lane}"
+        : inUse ? $"TOOL_UNLOAD LANE={Lane}"
+        : $"LANE_UNLOAD LANE={Lane}";
+}
 
 /// <summary>
 /// Toolheads with a spool each (empty on a printer without T0…Tn macros that hold a spool_id),
@@ -125,15 +139,18 @@ public sealed class SpoolmanException(string message, int statusCode = 0) : Exce
 /// <summary>
 /// Spoolman, through Moonraker's [spoolman] component: Moonraker's status and active spool, and
 /// Spoolman's spools through Moonraker's proxy, so no second address or key is needed. Per-tool
-/// spools are the spool_id variables on the T0…Tn macros. Every call throws if the printer can't be
-/// reached.
+/// spools are the spool_id variables on the T0…Tn macros, or an AFC filament changer's lanes. Every
+/// call throws if the printer can't be reached.
 /// </summary>
 public sealed class SpoolmanApi(IMoonrakerApi printer)
 {
     private static readonly Regex ToolMacro = new(@"^gcode_macro (T(\d+))$", RegexOptions.IgnoreCase);
+    private static readonly Regex LaneObject = new(@"^AFC_(stepper|lane) (\S+)$");
 
     // The printer's T0…Tn macros and extruders, looked up once (they change only with Klipper's config).
     private (List<(string Macro, string Tool, int Number)> Macros, HashSet<string> Extruders, HashSet<string> All)? _objects;
+    // An AFC filament changer's lane objects ("AFC_stepper lane1"), found with the rest.
+    private List<string> _lanes = [];
     private FilamentMacros? _filamentMacros;
     private string? _fileFor;
     private FileFilament? _file;
@@ -197,6 +214,13 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     public async Task<ToolSpools> GetToolsAsync(CancellationToken ct)
     {
         var (macros, extruders, _) = await ObjectsAsync(ct);
+        if (_lanes.Count > 0)
+        {
+            using var lanes = await printer.GetJsonAsync(
+                "/printer/objects/query?AFC=current_load" + string.Concat(_lanes.Select(l => $"&{Uri.EscapeDataString(l)}")),
+                ct, TimeSpan.FromSeconds(3));
+            return ReadLanes(lanes.RootElement.Prop("result").Prop("status"), _lanes);
+        }
         if (macros.Count == 0)
             return ToolSpools.None;
         using var doc = await printer.GetJsonAsync(
@@ -220,6 +244,7 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
                              .ToList(),
                         names.Where(n => n.StartsWith("extruder", StringComparison.Ordinal) && !n.Contains(' ')).ToHashSet(),
                         names.ToHashSet());
+            _lanes = names.Contains("AFC") ? names.Where(n => LaneObject.IsMatch(n)).ToList() : [];
         }
         return _objects.Value;
     }
@@ -292,6 +317,24 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
         return new ToolSpools(tools.Select(t => t.Tool).ToList(), active);
     }
 
+    /// <summary>
+    /// An AFC filament changer's lanes, as tools named by their map (T0, T1; the lane's own name if it
+    /// has none), in that order. The one in use is the lane loaded in the toolhead.
+    /// </summary>
+    internal static ToolSpools ReadLanes(JsonElement status, IReadOnlyList<string> lanes)
+    {
+        static int Number(string name) => int.TryParse(new string(name.Where(char.IsDigit).ToArray()), out int n) ? n : int.MaxValue;
+        var tools = lanes.Select(l => status.Prop(l)).Where(l => l.ValueKind == JsonValueKind.Object)
+            .Select(l => (Lane: l.Str("name"), Map: l.Str("map"), Id: l.Opt("spool_id"), Filament: l.Prop("load").ValueKind == JsonValueKind.True))
+            .Where(l => l.Lane.Length > 0)
+            .OrderBy(l => l.Map.Length > 0 ? Number(l.Map) : int.MaxValue).ThenBy(l => Number(l.Lane))
+            .Select(l => new Tool(l.Map.Length > 0 ? l.Map.ToUpperInvariant() : l.Lane, l.Id is double id and > 0 ? (int)id : null,
+                                  l.Lane, l.Filament))
+            .ToList();
+        string current = status.Prop("AFC").Str("current_load");
+        return new ToolSpools(tools, tools.FindIndex(t => t.Lane == current));
+    }
+
     /// <summary>The slicer's filament data for this G-code file (cached for the last file asked).</summary>
     public async Task<FileFilament> GetFileFilamentAsync(string filename, CancellationToken ct)
     {
@@ -357,6 +400,20 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     /// Puts a spool in a tool (null: takes it out): its macro's spool_id variable, as Mainsail and Fluidd
     /// set it, and Moonraker's active spool too if the tool is the one in use.
     /// </summary>
+    public async Task SetToolSpoolAsync(Tool tool, int? id, bool active, CancellationToken ct)
+    {
+        if (tool.Lane == null)
+        {
+            await SetToolSpoolAsync(tool.Name, id, active, ct);
+            return;
+        }
+        // AFC keeps the lane's spool (and takes its colour and material from Spoolman).
+        string script = $"SET_SPOOL_ID LANE={tool.Lane} SPOOL_ID={(id is int n ? n.ToString(CultureInfo.InvariantCulture) : "")}";
+        await printer.SendAsync(HttpMethod.Post, "/printer/gcode/script?script=" + Uri.EscapeDataString(script), null, ct);
+        if (active)
+            await SetActiveSpoolAsync(id, ct);
+    }
+
     public async Task SetToolSpoolAsync(string tool, int? id, bool active, CancellationToken ct)
     {
         string value = id is int n ? n.ToString(CultureInfo.InvariantCulture) : "None";

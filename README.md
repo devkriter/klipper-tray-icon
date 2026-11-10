@@ -45,6 +45,11 @@ The icon updates dynamically to show a circular progress bar corresponding to th
     printer's commands and macros, with their descriptions. While printing or paused, every command
     asks for a second click. Pins are a list in the module's settings (`Nozzle: M104 S{240}` asks
     for the temperature); right-click a recent command to pin it.
+  - **AFC** (Klipper with Armored Turtle's AFC: Box Turtle, NightOwl and other units): a drawing of
+    the filament changer, from each lane's spool through its sensors, the hub and the buffer to the
+    toolhead, with the path in the colour of the filament in it and sensors green when they see
+    filament. AFC's errors show in amber, with *Resume*. Hover a lane for *Load* and *Eject*, the
+    toolhead for *Unload*, each after a second click. Its *LANE* tile shows the tool in use.
 - **Webcam with console** (Klipper): the webcam popup shows the live Klipper console alongside the
   video, under a strip of key stats (nozzle and bed temperature, the chamber if the printer has a
   sensor for it, progress, layer, time left). Settings lets you choose up to 6 tiles for the strip,

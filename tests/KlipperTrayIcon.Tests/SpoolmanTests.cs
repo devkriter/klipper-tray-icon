@@ -241,6 +241,54 @@ public class SpoolmanTests
         Assert.Equal(2, state.Tools.Active); // T2 holds spool 7, Moonraker's active one
     }
 
+    /// <summary>A NightOwl: two AFC lanes feeding one toolhead, lane1 (T0) loaded, lane2 (T1) mapped first in the list.</summary>
+    private static (SpoolmanApi Api, FakeMoonraker Printer) MakeTwoLanes()
+    {
+        var (api, printer) = Make();
+        printer.Objects = """
+            ["toolhead","extruder","AFC","AFC_stepper lane2","AFC_stepper lane1","AFC_hub NightOwl_Hub","gcode_macro PRINT_START"]
+            """;
+        printer.Query = """
+            {"AFC":{"current_load":"lane1"},
+             "AFC_stepper lane1":{"name":"lane1","map":"T0","spool_id":17,"load":true},
+             "AFC_stepper lane2":{"name":"lane2","map":"T1","spool_id":null,"load":false}}
+            """;
+        return (api, printer);
+    }
+
+    [Fact]
+    public async Task AnAfcFilamentChangersLanesAreToolsAndTheLoadedLaneIsInUse()
+    {
+        var (api, _) = MakeTwoLanes();
+        var state = await new SpoolmanSource(api).GetAsync("", TimeSpan.Zero, default);
+        Assert.Equal([new Tool("T0", 17, "lane1", true), new Tool("T1", null, "lane2", false)], state.Tools.Tools);
+        Assert.Equal(0, state.Tools.Active);
+        Assert.True(state.MultiTool);
+        Assert.Equal(17, state.ActiveSpoolId);
+    }
+
+    [Fact]
+    public async Task PuttingASpoolInALaneSetsAfcsSpoolId()
+    {
+        var (api, printer) = MakeTwoLanes();
+        await api.SetToolSpoolAsync(new Tool("T1", null, "lane2"), 16, active: false, default);
+        Assert.Contains("POST /printer/gcode/script?script=SET_SPOOL_ID LANE=lane2 SPOOL_ID=16", printer.Requests);
+        Assert.DoesNotContain(printer.Requests, r => r.StartsWith("POST /server/spoolman/spool_id"));
+        await api.SetToolSpoolAsync(new Tool("T0", 17, "lane1"), null, active: true, default);
+        Assert.Contains("POST /printer/gcode/script?script=SET_SPOOL_ID LANE=lane1 SPOOL_ID=", printer.Requests);
+        Assert.Contains("POST /server/spoolman/spool_id {\"spool_id\":null}", printer.Requests);
+    }
+
+    [Fact]
+    public void LanesLoadWithChangeToolAndUnloadOutOfTheToolheadOrOutOfTheLane()
+    {
+        var lane = new Tool("T1", 16, "lane2");
+        Assert.Equal("CHANGE_TOOL LANE=lane2", lane.LaneScript(load: true, inUse: false));
+        Assert.Equal("TOOL_UNLOAD LANE=lane2", lane.LaneScript(load: false, inUse: true));
+        Assert.Equal("LANE_UNLOAD LANE=lane2", lane.LaneScript(load: false, inUse: false));
+        Assert.Null(new Tool("T1", 16).LaneScript(load: true, inUse: false));
+    }
+
     [Fact]
     public async Task PuttingASpoolInAToolSetsItsMacroAndTheActiveSpoolForTheToolInUse()
     {

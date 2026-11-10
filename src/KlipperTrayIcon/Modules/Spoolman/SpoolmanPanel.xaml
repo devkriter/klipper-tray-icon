@@ -5,7 +5,7 @@
                      xmlns:local="clr-namespace:KlipperTrayIcon.Modules.Spoolman">
     <!-- Spoolman: the spool(s) in the printer, and the other spools to switch to, in the popup's side panel. -->
     <modules:ModulePanel.Resources>
-        <!-- Use: small and quiet, like the queue's Start next. Blue when it asks for the second click. -->
+        <!-- Use: small and quiet, like the queue's Start next. Amber when it asks for the second click. -->
         <Style x:Key="UseButton" TargetType="Button">
             <!-- Not focused by a click: the row it's in is replaced when it arms, and focus moving scrolls the page. -->
             <Setter Property="Focusable" Value="False" />
@@ -51,7 +51,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- Load and Unload: a small outlined button in blue. Filled blue while it waits for the second
+        <!-- Load and Unload: a small outlined button in blue. Amber while it waits for the second
              click (Tag "armed"), dim when it can't run; its tooltip says why, even then. -->
         <Style x:Key="ActionButton" TargetType="Button">
             <Setter Property="Foreground" Value="#60CDFF" />
@@ -73,9 +73,9 @@
                                 <Setter TargetName="Bg" Property="Background" Value="#1F2A33" />
                             </Trigger>
                             <Trigger Property="Tag" Value="armed">
-                                <Setter TargetName="Bg" Property="Background" Value="#60CDFF" />
-                                <Setter TargetName="Bg" Property="BorderBrush" Value="#60CDFF" />
-                                <Setter Property="Foreground" Value="#002033" />
+                                <Setter TargetName="Bg" Property="Background" Value="#E3B341" />
+                                <Setter TargetName="Bg" Property="BorderBrush" Value="#E3B341" />
+                                <Setter Property="Foreground" Value="Black" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -177,9 +177,9 @@
                                             Margin="3,0,0,0" Click="OnPickClick" />
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Armed}" Value="True">
-                                            <Setter TargetName="Pick" Property="Background" Value="#60CDFF" />
-                                            <Setter TargetName="Pick" Property="BorderBrush" Value="#60CDFF" />
-                                            <Setter TargetName="Pick" Property="Foreground" Value="#002033" />
+                                            <Setter TargetName="Pick" Property="Background" Value="#E3B341" />
+                                            <Setter TargetName="Pick" Property="BorderBrush" Value="#E3B341" />
+                                            <Setter TargetName="Pick" Property="Foreground" Value="Black" />
                                             <Setter TargetName="Pick" Property="FontWeight" Value="SemiBold" />
                                         </DataTrigger>
                                     </DataTemplate.Triggers>
@@ -204,9 +204,9 @@
                 <DataTrigger Binding="{Binding Armed}" Value="True">
                     <Setter TargetName="Weight" Property="Visibility" Value="Hidden" />
                     <Setter TargetName="Use" Property="Visibility" Value="Visible" />
-                    <Setter TargetName="Use" Property="Background" Value="#60CDFF" />
-                    <Setter TargetName="Use" Property="BorderBrush" Value="#60CDFF" />
-                    <Setter TargetName="Use" Property="Foreground" Value="#002033" />
+                    <Setter TargetName="Use" Property="Background" Value="#E3B341" />
+                    <Setter TargetName="Use" Property="BorderBrush" Value="#E3B341" />
+                    <Setter TargetName="Use" Property="Foreground" Value="Black" />
                     <Setter TargetName="Use" Property="FontWeight" Value="SemiBold" />
                 </DataTrigger>
                 <!-- Picking a toolhead: its buttons while hovering, and while one waits for its second click. -->

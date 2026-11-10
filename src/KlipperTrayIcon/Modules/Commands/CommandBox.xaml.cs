@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using KlipperTrayIcon.Printers;
 
 namespace KlipperTrayIcon.Modules.Commands;
@@ -55,6 +56,11 @@ public partial class CommandBox : ModuleConsoleInput
     private string? _armed;
     private string? _typo;
     private string? _error;
+    // The amber line goes after a while (a typo, an error, or the second click not coming); it comes
+    // back when something new is said, or on typing.
+    private readonly DispatcherTimer _fade = new() { Interval = TimeSpan.FromSeconds(5) };
+    private string? _said;
+    private bool _faded;
 
     public CommandBox(ModuleContext context, CommandHistory history)
     {
@@ -93,6 +99,12 @@ public partial class CommandBox : ModuleConsoleInput
                 };
         };
         SizeChanged += (_, _) => Dropdown.Width = Math.Max(0, ActualWidth - 20);
+        _fade.Tick += (_, _) =>
+        {
+            _fade.Stop();
+            (_armed, _error, _faded) = (null, null, true);
+            Show();
+        };
         Show();
     }
 
@@ -148,7 +160,7 @@ public partial class CommandBox : ModuleConsoleInput
             Set(capital, caret, 0);
         }
         _history.StopStepping();
-        (_armed, _error, _moved) = (null, null, false);
+        (_armed, _error, _moved, _said) = (null, null, false, null);
         if (Input.Text.Trim().Length > 0)
             _openEmpty = false;
         Show();
@@ -335,8 +347,16 @@ public partial class CommandBox : ModuleConsoleInput
         ShowGhost();
 
         bool armed = _armed != null && Guarded;
-        Say.Text = armed ? "Print in progress. Did you mean to send this?"
+        string say = armed ? "Print in progress. Did you mean to send this?"
             : _error ?? (_typo == null ? "" : _typo.Length > 0 ? $"Command not recognized. Did you mean {_typo}?" : "Command not recognized.");
+        if (say != _said)
+        {
+            (_said, _faded) = (say, false);
+            _fade.Stop();
+            if (say.Length > 0)
+                _fade.Start();
+        }
+        Say.Text = _faded ? "" : say;
         Say.Visibility = Say.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         SendButton.Content = armed ? "Send anyway" : "Send";
         SendButton.Tag = armed ? "armed" : null;

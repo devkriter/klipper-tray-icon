@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.17.0] - 2026-11-09
 ### Added
 - *AFC* module, for Armored Turtle's AFC filament changers (Box Turtle, NightOwl and other AFC
   units): a page that draws the unit, from each lane's spool through its Prep and Load sensors,

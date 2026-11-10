@@ -7,7 +7,7 @@
   the hub and the buffer to the toolhead's Pre and Post sensors. The path is drawn in the colour
   of the filament in it and sensors turn green when they see filament; an empty lane is dashed,
   and a bypass branch shows on printers with a bypass sensor. The header shows the unit's name and
-  what AFC is doing ("Change 3 of 12 · Loading T1" in a print); AFC's error shows in amber with the
+  what AFC is doing ("Change 3 of 12 Â· Loading T1" in a print); AFC's error shows in amber with the
   sensor it's about ringed, and *Resume* (`AFC_RESUME`). Hovering a lane shows *Load* and *Eject*,
   hovering the toolhead *Unload*, each after a second click and not while printing. Refreshed once a
   second while the page shows. Adds an optional LANE tile: the tool in use and its filament.

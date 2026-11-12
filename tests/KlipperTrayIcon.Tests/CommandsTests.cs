@@ -232,4 +232,40 @@ public class CommandsTests
         var refused = await Assert.ThrowsAsync<MoonrakerHttpException>(() => backend.SendGcodeAsync("G2B", default));
         Assert.Equal(400, (int)refused.StatusCode);
     }
+
+    private sealed class Refusing : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("""{"error":{"code":400,"message":"Must home axis first: 0.000 0.000 5.000 [0.000]"}}"""),
+            });
+    }
+
+    [Fact]
+    public async Task RefusedGcodeCarriesKlippersError()
+    {
+        var printer = new MoonrakerBackend("p", http: new HttpClient(new Refusing()));
+        var e = await Assert.ThrowsAsync<MoonrakerHttpException>(() => printer.SendGcodeAsync("G1 Z5", default));
+        Assert.Equal(400, (int)e.StatusCode);
+        Assert.Equal("Must home axis first: 0.000 0.000 5.000 [0.000]", e.Reason);
+    }
+
+    [Fact]
+    public void ASentCommandIsPendingThenDoneOrFailed()
+    {
+        var sent = new SentCommand("G28");
+        int changes = 0;
+        typeof(SentCommand).GetEvent("Changed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetAddMethod(true)!.Invoke(sent, [(Action)(() => changes++)]);
+        Assert.True(sent.Pending);
+        sent.Done();
+        Assert.False(sent.Pending);
+        Assert.Null(sent.Error);
+        var failed = new SentCommand("G28");
+        failed.Fail("Couldn't send: timed out");
+        Assert.False(failed.Pending);
+        Assert.Equal("Couldn't send: timed out", failed.Error);
+        Assert.Equal(1, changes);
+    }
 }

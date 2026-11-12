@@ -92,7 +92,9 @@ public partial class AfcPanel : ModulePanel
         Bypassed = Frozen("#D0D0D0"), NoColor = Frozen("#777777"), Tool = Frozen("#1C1C1C"), ToolLine = Frozen("#333333"),
         ToolHover = Frozen("#4A4A4A"), Nozzle = Frozen("#9A9A9A"), Faint = Frozen("#6A6A6A");
 
-    private const double Hx = 200, HubY = 166, Width_ = 400;
+    private const double Hx = 200, HubY = 166, Width_ = 400, TallHeight = 348;
+    // The wide drawing: lanes on the left, the path running right to the toolhead.
+    private const double WideWidth = 620;
 
     private readonly AfcSource _source;
     private readonly IMoonrakerApi _printer;
@@ -111,6 +113,8 @@ public partial class AfcPanel : ModulePanel
 
     // The drawing, made for the state's shape (lanes, hubs, sensors) and updated in place.
     private string _shape = "";
+    // Drawn left to right: the panel is too low for the drawing top to bottom (under the webcam, say).
+    private bool _wide;
     private readonly List<LaneView> _lanes = new();
     private readonly Dictionary<string, (Ellipse Dot, Segment Out)> _hubs = new();
     private Segment? _hubOut, _bufferOut, _toPre, _toPost, _join;
@@ -136,6 +140,7 @@ public partial class AfcPanel : ModulePanel
             _note = null;
             Update();
         };
+        SizeChanged += (_, _) => Fit();
         Update();
         _ = Task.Run(() => LoopAsync(_lifetime));
     }
@@ -229,8 +234,25 @@ public partial class AfcPanel : ModulePanel
         Drawing.Opacity = down ? 0.45 : 1;
     }
 
-    /// <summary>What the drawing is made of: it's made again only when this changes (Klipper's config did).</summary>
-    private static string Shape(AfcState s) => string.Join("|",
+    /// <summary>
+    /// Top to bottom if it fits the panel's height, else left to right when the panel is wide enough
+    /// for that, or at least wider (for its height) than the drawing top to bottom is.
+    /// </summary>
+    private void Fit()
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0)
+            return;
+        double room = ActualHeight - Header.ActualHeight - Header.Margin.Top - Header.Margin.Bottom - 10;
+        bool wide = room < TallHeight && (ActualWidth >= WideWidth || ActualWidth / Math.Max(room, 1) > Width_ / TallHeight);
+        if (wide == _wide)
+            return;
+        _wide = wide;
+        _shape = "";
+        Update();
+    }
+
+    /// <summary>What the drawing is made of: it's made again only when this changes (Klipper's config did, or the layout).</summary>
+    private string Shape(AfcState s) => _wide + "|" + string.Join("|",
         string.Join(",", s.Lanes.Select(l => l.Name + ">" + l.Hub)), string.Join(",", s.Hubs.Select(h => h.Name)),
         s.Buffers.Count, s.Extruders.FirstOrDefault() is { } x ? $"{x.Pre != null}{x.Post != null}" : "-", s.HasBypass);
 
@@ -367,6 +389,12 @@ public partial class AfcPanel : ModulePanel
         Drawing.Children.Clear();
         _lanes.Clear();
         _hubs.Clear();
+        if (_wide)
+        {
+            BuildWide(state);
+            return;
+        }
+        (Drawing.Width, Drawing.Height) = (Width_, TallHeight);
         int n = Math.Max(state.Lanes.Count, 1);
         const double gap = 6, left = 10;
         double w = (Width_ - 2 * left - gap * (n - 1)) / n;
@@ -476,7 +504,126 @@ public partial class AfcPanel : ModulePanel
         _toolGroup.MouseLeave += (_, _) => Update();
     }
 
-    private LaneView Card(AfcLane lane, double x, double w, bool compact)
+    /// <summary>
+    /// The same drawing left to right: the lanes stacked on the left, each through its Prep and Load
+    /// sensors to the hub, then the buffer, the bypass joining from above, and the toolhead on the right.
+    /// </summary>
+    private void BuildWide(AfcState state)
+    {
+        int n = Math.Max(state.Lanes.Count, 1);
+        const double cardW = 186, cardH = 62, gap = 6, left = 10;
+        double lanesH = n * cardH + (n - 1) * gap;
+        double height = Math.Max(lanesH + 10, 110), mid = Math.Round(height / 2), top = (height - lanesH) / 2;
+        (Drawing.Width, Drawing.Height) = (WideWidth, height);
+        const double laneEnd = left + cardW, hubX = 296, bufferX = 400, joinX = 492, toolX = 512;
+
+        // Lanes: card → Prep → Load → the hub.
+        for (int i = 0; i < state.Lanes.Count; i++)
+        {
+            var lane = state.Lanes[i];
+            double y = top + i * (cardH + gap), cy = Math.Round(y + cardH / 2);
+            var line = Seg($"M{F(laneEnd)},{F(cy)} L268,{F(cy)}");
+            var curve = Math.Abs(cy - mid) < 1
+                ? Seg($"M268,{F(cy)} L{F(hubX)},{F(mid)}")
+                : Seg($"M268,{F(cy)} C284,{F(cy)} 280,{F(mid)} {F(hubX)},{F(mid)}");
+            var sensors = new Canvas();
+            var (prep, prepLabel) = Sensor(sensors, 222, cy, "Prep", true, true, lane.Name + "_prep");
+            var (load, loadLabel) = Sensor(sensors, 250, cy, "Load", true, true, lane.Name + "_load");
+            Above(prepLabel, 222, cy);
+            Above(loadLabel, 250, cy);
+            Drawing.Children.Add(sensors);
+            var view = Card(lane, left, cardW, compact: false, y + 0.5);
+            (view.Top, view.Curve, view.Prep, view.LoadDot, view.PrepLabel, view.LoadLabel, view.Sensors, view.X) =
+                (line, curve, prep, load, prepLabel, loadLabel, sensors, mid);
+            _lanes.Add(view);
+        }
+
+        // The hub (several share the one box: drawn as the first), on to the buffer.
+        foreach (var hub in state.Hubs)
+        {
+            var output = Seg($"M{F(hubX + 68)},{F(mid)} L{F(bufferX)},{F(mid)}");
+            Add(new Rectangle { Width = 68, Height = 24, RadiusX = 4, RadiusY = 4, Fill = Box, Stroke = BoxLine }, hubX, mid - 12);
+            Add(MakeText("HUB", 10.5, Fg, bold: true, spacing: true), hubX + 8, mid - 7.5);
+            var dot = new Ellipse { Width = 9, Height = 9, StrokeThickness = 1.5, ToolTip = Tip(hub.Sensor) };
+            Add(dot, hubX + 54 - 4.5, mid - 4.5);
+            _hubs[hub.Name] = (dot, output);
+        }
+        _hubOut = state.Hubs.Count == 0 ? Seg($"M{F(hubX)},{F(mid)} L{F(bufferX)},{F(mid)}") : null;
+
+        // The buffer, its state under it.
+        double bufferEnd = state.HasBypass ? joinX : toolX;
+        if (state.Buffers.Count > 0)
+        {
+            Add(new Rectangle { Width = 68, Height = 24, RadiusX = 4, RadiusY = 4, Fill = Box, Stroke = BoxLine }, bufferX, mid - 12);
+            var name = MakeText("BUFFER", 10.5, Fg, bold: true, spacing: true);
+            name.Width = 68;
+            name.TextAlignment = TextAlignment.Center;
+            name.ToolTip = Tip(state.Buffers[0].Name);
+            Add(name, bufferX, mid - 7.5);
+            _bufferState = MakeText("", 11, Dim);
+            _bufferState.Width = 68;
+            _bufferState.TextAlignment = TextAlignment.Center;
+            Add(_bufferState, bufferX, mid + 15);
+            _bufferOut = Seg($"M{F(bufferX + 68)},{F(mid)} L{F(bufferEnd)},{F(mid)}");
+        }
+        else
+        {
+            _bufferState = null;
+            _bufferOut = Seg($"M{F(bufferX)},{F(mid)} L{F(bufferEnd)},{F(mid)}");
+        }
+
+        // Bypass: a thin branch coming down to join before the toolhead.
+        if (state.HasBypass)
+        {
+            _bypassBranch = new Path
+            {
+                Data = Geometry.Parse($"M{F(joinX)},{F(mid - 40)} L{F(joinX)},{F(mid - 6)} Q{F(joinX)},{F(mid)} {F(joinX + 6)},{F(mid)}"),
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            };
+            Drawing.Children.Add(_bypassBranch);
+            _bypassLabel = MakeText("Bypass", 10.5, Faint);
+            _bypassLabel.Width = 60;
+            _bypassLabel.TextAlignment = TextAlignment.Center;
+            Add(_bypassLabel, joinX - 30, mid - 56);
+            _join = Seg($"M{F(joinX + 6)},{F(mid)} L{F(toolX)},{F(mid)}");
+        }
+        else
+            (_bypassBranch, _bypassLabel, _join) = (null, null, null);
+
+        // The toolhead, lying down: in from the left, its sensors, the nozzle on the right; Unload under it.
+        var tool = state.Extruders.FirstOrDefault();
+        _toolGroup = new Canvas { Width = 100, Height = 74, Background = Brushes.Transparent };
+        Canvas.SetLeft(_toolGroup, toolX);
+        Canvas.SetTop(_toolGroup, mid - 22);
+        Drawing.Children.Add(_toolGroup);
+        _toolBox = new Rectangle { Width = 96, Height = 44, RadiusX = 6, RadiusY = 6, Fill = Tool, Stroke = ToolLine };
+        _toolGroup.Children.Add(_toolBox);
+        _toPre = Seg("M0,22 L44,22", _toolGroup);
+        _toPost = Seg("M44,22 L76,22", _toolGroup);
+        _toolGroup.Children.Add(new Path { Data = Geometry.Parse("M76,13 L76,31 L86,25 L86,19 Z"), Fill = Nozzle });
+        (_pre, _preLabel) = tool?.Pre != null ? Sensor(_toolGroup, 28, 22, "Pre", true, true, tool.PreSensor) : (null, null);
+        (_post, _postLabel) = tool?.Post != null ? Sensor(_toolGroup, 58, 22, "Post", true, true, tool.PostSensor) : (null, null);
+        Above(_preLabel, 28, 22);
+        Above(_postLabel, 58, 22);
+        _unload = MakeButton("Unload", "unload");
+        Canvas.SetLeft(_unload, 0);
+        Canvas.SetTop(_unload, 50);
+        _toolGroup.Children.Add(_unload);
+        _toolGroup.MouseEnter += (_, _) => Update();
+        _toolGroup.MouseLeave += (_, _) => Update();
+    }
+
+    /// <summary>A sensor's name over its dot at (x, y), in the drawing left to right.</summary>
+    private static void Above(TextBlock? label, double x, double y)
+    {
+        if (label == null)
+            return;
+        label.TextAlignment = TextAlignment.Center;
+        Canvas.SetLeft(label, x - label.Width / 2);
+        Canvas.SetTop(label, y - 22);
+    }
+
+    private LaneView Card(AfcLane lane, double x, double w, bool compact, double y = 4.5)
     {
         var card = new Grid { Width = w, Height = 62, Background = Brushes.Transparent, ClipToBounds = true };
         var frame = new Rectangle { RadiusX = 5, RadiusY = 5, StrokeThickness = 1 };
@@ -544,7 +691,7 @@ public partial class AfcPanel : ModulePanel
         card.MouseEnter += (_, _) => Update();
         card.MouseLeave += (_, _) => Update();
         Canvas.SetLeft(card, x + 0.5);
-        Canvas.SetTop(card, 4.5);
+        Canvas.SetTop(card, y);
         Drawing.Children.Add(card);
         return new LaneView
         {

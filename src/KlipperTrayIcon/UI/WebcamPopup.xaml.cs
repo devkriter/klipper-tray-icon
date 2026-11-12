@@ -112,7 +112,8 @@ public partial class WebcamPopup : Window
             Layout.SizeChanged += (_, _) => UpdateArrangement();
             UpdateArrangement();
             if (showConsole)
-                _console = new ConsoleFeed(backend, ConsoleList, ConsoleScroll, Dispatcher, _lifetime.Token);
+                _console = new ConsoleFeed(backend, new ConsoleText(ConsoleBox, (FontFamily)FindResource("MonoFont")), ConsoleScroll, Dispatcher,
+                                           _lifetime.Token);
             SetUpPanels(showConsole, panels);
             ShowStatus(PrinterStatus.Connecting);
         }
@@ -322,12 +323,6 @@ public partial class WebcamPopup : Window
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => HidePopup();
 
-    private void OnConsoleLinkClick(object sender, MouseButtonEventArgs e)
-    {
-        if ((sender as FrameworkContentElement)?.DataContext is ConsoleLine { Click: { } click }) // the link's Run
-            click();
-    }
-
     /// <summary>Closes the window for good (settings changed, or the app is exiting).</summary>
     public void Shutdown()
     {
@@ -438,6 +433,7 @@ public partial class WebcamPopup : Window
             // In front of the lines, so it can draw over them (its dropdown).
             System.Windows.Controls.Panel.SetZIndex(input, 1);
             input.LatestWanted += () => _console?.ShowLatest();
+            input.CommandSending += sent => _console?.Track(sent);
             _inputs.Add(input);
         }
     }
@@ -1029,6 +1025,9 @@ public sealed class ConsoleLine
     public string Link { get; private init; } = "";
     public bool HasLink => LinkPrefix.Length + Link.Length > 0;
     public Action? Click { get; private init; }
+    // A command still being sent ("…" after it), or why it failed (a ⚠ after it, this on hover).
+    public bool Pending { get; private init; }
+    public string? Warning { get; private init; }
     public bool IsClickable => Click != null;
     public Brush LinkBrush => Command;
 
@@ -1077,6 +1076,10 @@ public sealed class ConsoleLine
         return string.Join("\n", lines);
     }
 
+    /// <summary>A command sent from the box under the console: dim while it's sent, then as any command; ⚠ if it failed.</summary>
+    public static ConsoleLine Sending(SentCommand sent, string time) =>
+        new() { Time = time, Text = "> " + sent.Command, Brush = sent.Pending ? Dimmed : Command, Pending = sent.Pending, Warning = sent.Error };
+
     public static ConsoleLine StatusMessage(string text) =>
         new() { Text = text, Brush = Status, FontStyle = FontStyles.Italic, FontFamily = Ui };
 
@@ -1117,15 +1120,15 @@ internal sealed class ConsoleFeed
     private bool _restarting;
     private readonly CancellationToken _ct;
 
-    public ConsoleFeed(IPrinterBackend backend, System.Windows.Controls.ItemsControl list,
+    public ConsoleFeed(IPrinterBackend backend, ConsoleText text,
                        System.Windows.Controls.ScrollViewer scroll, System.Windows.Threading.Dispatcher ui, CancellationToken ct)
     {
         _backend = backend;
         _scroll = scroll;
         _ui = ui;
         _ct = ct;
-        list.ItemsSource = _lines;
         _lines.Add(ConsoleLine.StatusMessage("Loading console…"));
+        text.Bind(_lines);
         _ = Task.Run(() => LoopAsync(ct));
     }
 
@@ -1139,6 +1142,42 @@ internal sealed class ConsoleFeed
         _scroll.ScrollToEnd();
     }
     public void Pause() => _active = false;
+
+    // Commands sent from here, by their line; Moonraker's own copy of each (it logs every command) isn't added again.
+    private readonly List<(SentCommand Sent, bool Echoed)> _sent = new();
+
+    /// <summary>A command sent from the box under the console: its line now, updated when it's done or fails.</summary>
+    public void Track(SentCommand sent)
+    {
+        var line = ConsoleLine.Sending(sent, DateTime.Now.ToString("HH:mm:ss"));
+        bool follow = AtBottom;
+        _lines.Add(line);
+        _sent.Add((sent, false));
+        if (_sent.Count > 50)
+            _sent.RemoveAt(0);
+        sent.Changed += () =>
+        {
+            int at = _lines.IndexOf(line);
+            if (at < 0)
+                return; // scrolled out, or the console started over
+            line = ConsoleLine.Sending(sent, line.Time);
+            _lines[at] = line;
+        };
+        if (follow)
+            _scroll.Dispatcher.InvokeAsync(_scroll.ScrollToEnd, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Moonraker's copy of a command sent from here: already shown (the first not yet matched).</summary>
+    private bool Echo(ConsoleEntry entry)
+    {
+        if (entry.Type != "command")
+            return false;
+        int at = _sent.FindIndex(s => !s.Echoed && s.Sent.Command == entry.Message.Trim());
+        if (at < 0)
+            return false;
+        _sent[at] = (_sent[at].Sent, true);
+        return true;
+    }
 
     private async Task LoopAsync(CancellationToken ct)
     {
@@ -1228,7 +1267,8 @@ internal sealed class ConsoleFeed
         }
         bool follow = AtBottom;
         foreach (var entry in entries)
-            _lines.Add(ConsoleLine.FromEntry(entry));
+            if (startOver || !Echo(entry))
+                _lines.Add(ConsoleLine.FromEntry(entry));
         while (_lines.Count > MaxLines)
             _lines.RemoveAt(0);
         if (follow)

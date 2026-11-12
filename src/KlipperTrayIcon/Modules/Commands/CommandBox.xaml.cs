@@ -55,7 +55,6 @@ public partial class CommandBox : ModuleConsoleInput
     // The text sent on the next Enter or click while printing (null: not asked yet).
     private string? _armed;
     private string? _typo;
-    private string? _error;
     // The amber line goes after a while (a typo, an error, or the second click not coming); it comes
     // back when something new is said, or on typing.
     private readonly DispatcherTimer _fade = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -102,7 +101,7 @@ public partial class CommandBox : ModuleConsoleInput
         _fade.Tick += (_, _) =>
         {
             _fade.Stop();
-            (_armed, _error, _faded) = (null, null, true);
+            (_armed, _faded) = (null, true);
             Show();
         };
         Show();
@@ -160,7 +159,7 @@ public partial class CommandBox : ModuleConsoleInput
             Set(capital, caret, 0);
         }
         _history.StopStepping();
-        (_armed, _error, _moved, _said) = (null, null, false, null);
+        (_armed, _moved, _said) = (null, false, null);
         if (Input.Text.Trim().Length > 0)
             _openEmpty = false;
         Show();
@@ -190,7 +189,7 @@ public partial class CommandBox : ModuleConsoleInput
                 {
                     _stepped = step;
                     Set(step, step.Length, 0);
-                    (_armed, _error) = (null, null);
+                    _armed = null;
                     Show();
                 }
                 e.Handled = true;
@@ -271,7 +270,7 @@ public partial class CommandBox : ModuleConsoleInput
     private void OnFilled()
     {
         _history.StopStepping();
-        (_armed, _error, _moved) = (null, null, false);
+        (_armed, _moved) = (null, false);
         Show();
     }
 
@@ -308,7 +307,7 @@ public partial class CommandBox : ModuleConsoleInput
             Show();
             return;
         }
-        (_armed, _error, _openEmpty) = (null, null, false);
+        (_armed, _openEmpty) = (null, false);
         _history.Add(text);
         Set("", 0, 0);
         Close();
@@ -317,16 +316,24 @@ public partial class CommandBox : ModuleConsoleInput
         _ = SendAsync(text);
     }
 
+    /// <summary>Sends it, shown in the console meanwhile: dim while it runs, marked ⚠ if it fails (why on hover).</summary>
     private async Task SendAsync(string text)
     {
-        try { await Task.Run(() => _printer.SendGcodeAsync(text, _context.Lifetime)); }
-        // Klipper said no: its error is in the console.
-        catch (MoonrakerHttpException e) when ((int)e.StatusCode == 400) { }
+        var sent = Sending(text);
+        try
+        {
+            await Task.Run(() => _printer.SendGcodeAsync(text, _context.Lifetime));
+            sent.Done();
+        }
+        // Klipper said no (its error is in the console too).
+        catch (MoonrakerHttpException e) when ((int)e.StatusCode == 400)
+        {
+            sent.Fail(e.Reason.Length > 0 ? e.Reason : "Klipper refused it");
+        }
         catch (OperationCanceledException) { }
         catch (Exception e)
         {
-            _error = "Couldn't send: " + _backend.DescribeError(e);
-            Show();
+            sent.Fail("Couldn't send: " + _backend.DescribeError(e));
         }
     }
 
@@ -348,7 +355,7 @@ public partial class CommandBox : ModuleConsoleInput
 
         bool armed = _armed != null && Guarded;
         string say = armed ? "Print in progress. Did you mean to send this?"
-            : _error ?? (_typo == null ? "" : _typo.Length > 0 ? $"Command not recognized. Did you mean {_typo}?" : "Command not recognized.");
+            : (_typo == null ? "" : _typo.Length > 0 ? $"Command not recognized. Did you mean {_typo}?" : "Command not recognized.");
         if (say != _said)
         {
             (_said, _faded) = (say, false);

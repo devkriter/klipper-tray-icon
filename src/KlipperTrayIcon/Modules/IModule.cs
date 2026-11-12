@@ -198,5 +198,40 @@ public class ModuleConsoleInput : UserControl
     /// <summary>Scrolls the console to its newest line and checks for new ones now (e.g. after sending a command).</summary>
     protected void ShowLatest() => LatestWanted?.Invoke();
 
+    /// <summary>
+    /// Shows a command in the console as it's being sent; call <see cref="SentCommand.Done"/> once the
+    /// printer has it, or <see cref="SentCommand.Fail"/> with why it failed. Call on the UI thread.
+    /// </summary>
+    protected SentCommand Sending(string command)
+    {
+        var sent = new SentCommand(command);
+        CommandSending?.Invoke(sent);
+        return sent;
+    }
+
     internal event Action? LatestWanted;
+    internal event Action<SentCommand>? CommandSending;
+}
+
+/// <summary>A command a module sent, as the console shows it: sending, sent, or failed (and why).</summary>
+public sealed class SentCommand(string command)
+{
+    public string Command { get; } = command;
+    public bool Pending { get; private set; } = true;
+    /// <summary>Why it failed, or null.</summary>
+    public string? Error { get; private set; }
+
+    internal event Action? Changed;
+
+    public void Done()
+    {
+        Pending = false;
+        Changed?.Invoke();
+    }
+
+    public void Fail(string error)
+    {
+        (Pending, Error) = (false, error);
+        Changed?.Invoke();
+    }
 }

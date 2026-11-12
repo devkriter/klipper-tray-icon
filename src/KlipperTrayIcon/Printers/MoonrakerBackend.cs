@@ -107,7 +107,7 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
         {
             using var response = await _http.SendAsync(request, cts.Token);
             if (!response.IsSuccessStatusCode)
-                throw new MoonrakerHttpException(response.StatusCode);
+                throw await FailureAsync(response, cts.Token);
             await using var body = await response.Content.ReadAsStreamAsync(cts.Token);
             return await JsonDocument.ParseAsync(body, cancellationToken: cts.Token);
         }
@@ -115,6 +115,19 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
         {
             throw new TimeoutException($"{BaseUrl} didn't respond in time");
         }
+    }
+
+    /// <summary>The error for a refused request, with Moonraker's reason ("Must home axis first") if it gave one.</summary>
+    private static async Task<MoonrakerHttpException> FailureAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        string reason = "";
+        try
+        {
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            reason = doc.RootElement.Prop("error").Str("message").Trim();
+        }
+        catch (Exception e) when (e is JsonException or HttpRequestException) { }
+        return new MoonrakerHttpException(response.StatusCode, reason);
     }
 
     public string DescribeError(Exception e) => e switch
@@ -373,7 +386,7 @@ public sealed class MoonrakerBackend : IPrinterBackend, IMoonrakerApi
         {
             using var response = await _http.SendAsync(request, cts.Token);
             if (!response.IsSuccessStatusCode)
-                throw new MoonrakerHttpException(response.StatusCode);
+                throw await FailureAsync(response, cts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -934,10 +947,12 @@ internal sealed record ViewSource(string? Stream, string Snapshot, string? Touch
 /// <summary>One way a webcam can be shown; for snapshots, Url is the snapshot.</summary>
 internal sealed record StreamChoice(StreamKind Kind, string Url);
 
-public sealed class MoonrakerHttpException(HttpStatusCode statusCode)
+public sealed class MoonrakerHttpException(HttpStatusCode statusCode, string reason = "")
     : Exception($"HTTP {(int)statusCode}")
 {
     public HttpStatusCode StatusCode { get; } = statusCode;
+    /// <summary>Moonraker's own message, e.g. Klipper's error for refused G-code; empty if it gave none.</summary>
+    public string Reason { get; } = reason;
 }
 
 /// <summary>Forgiving JSON accessors: missing or mistyped fields read as defaults.</summary>

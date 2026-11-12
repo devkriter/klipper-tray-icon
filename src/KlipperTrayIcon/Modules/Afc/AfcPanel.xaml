@@ -83,7 +83,7 @@
         </ScrollViewer.Resources>
         <StackPanel>
             <!-- NIGHTOWL, and what AFC is doing. -->
-            <Grid Margin="14,10,14,4">
+            <Grid x:Name="Header" Margin="14,10,14,4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition />
                     <ColumnDefinition Width="Auto" />

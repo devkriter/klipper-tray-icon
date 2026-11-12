@@ -216,55 +216,12 @@
                                FontWeight="SemiBold" Margin="12,7,12,6" />
                     <ScrollViewer x:Name="ConsoleScroll" VerticalScrollBarVisibility="Hidden"
                                   HorizontalScrollBarVisibility="Disabled" PanningMode="VerticalOnly">
-                        <ItemsControl x:Name="ConsoleList" Margin="12,0,12,8">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="0,2,0,3">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Time}" Foreground="#7A7A7A" FontSize="12"
-                                                   FontFamily="{StaticResource MonoFont}" Margin="0,1,10,0"
-                                                   Visibility="{Binding HasTime, Converter={StaticResource BoolToVisibility}}" />
-                                        <!-- Second column: wrapped and multi-line messages stay under the
-                                             message, never under the time. -->
-                                        <StackPanel Grid.Column="1">
-                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Brush}"
-                                                       FontStyle="{Binding FontStyle}" FontWeight="{Binding FontWeight}"
-                                                       FontSize="13" LineHeight="18"
-                                                       FontFamily="{Binding FontFamily}" TextWrapping="Wrap" />
-                                            <!-- Under a Klipper shutdown: "Click to restart.", or "Failed to restart.
-                                                 Click to try again." with only the second part a link. -->
-                                            <TextBlock FontSize="13" FontFamily="Segoe UI" Margin="0,2,0,0" TextWrapping="Wrap"
-                                                       Foreground="#A0A0A0"
-                                                       Visibility="{Binding HasLink, Converter={StaticResource BoolToVisibility}}">
-                                                <Run Text="{Binding LinkPrefix, Mode=OneWay}" /><Run
-                                                     Text="{Binding Link, Mode=OneWay}" Foreground="{Binding LinkBrush, Mode=OneWay}"
-                                                     MouseLeftButtonUp="OnConsoleLinkClick">
-                                                    <Run.Style>
-                                                        <Style TargetType="Run">
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsClickable}" Value="True">
-                                                                    <Setter Property="Cursor" Value="Hand" />
-                                                                </DataTrigger>
-                                                                <MultiDataTrigger>
-                                                                    <MultiDataTrigger.Conditions>
-                                                                        <Condition Binding="{Binding IsClickable}" Value="True" />
-                                                                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
-                                                                    </MultiDataTrigger.Conditions>
-                                                                    <Setter Property="TextDecorations" Value="Underline" />
-                                                                </MultiDataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Run.Style>
-                                                </Run>
-                                            </TextBlock>
-                                        </StackPanel>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <!-- One read-only document (ConsoleText), so lines can be selected across and copied. -->
+                        <RichTextBox x:Name="ConsoleBox" Margin="12,0,12,8" IsReadOnly="True" IsDocumentEnabled="True"
+                                     Background="Transparent" BorderThickness="0" Padding="0" Foreground="#ECECEC"
+                                     SelectionBrush="#60CDFF" SelectionOpacity="0.35" CaretBrush="Transparent"
+                                     VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"
+                                     FocusVisualStyle="{x:Null}" />
                     </ScrollViewer>
                     </DockPanel>
 

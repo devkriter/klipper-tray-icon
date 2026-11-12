@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.17.1] - 2026-11-12
+### Changed
+- AFC: when the page is too low for the drawing top to bottom (the panel under the webcam), it's drawn
+  left to right: the lanes on the left, the path running right through the hub and buffer to the toolhead.
+- The console's text can be selected, across lines, and copied (Ctrl+C or right-click).
+- Console commands: a sent command shows in the console right away, dimmed with … until the printer
+  has run it. If it fails, a ⚠ follows it, with why on hover, instead of the amber line above the box.
+
 ## [2.17.0] - 2026-11-09
 ### Added
 - *AFC* module, for Armored Turtle's AFC filament changers (Box Turtle, NightOwl and other AFC

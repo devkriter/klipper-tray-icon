@@ -625,8 +625,10 @@ public partial class SpoolmanPanel : ModulePanel
         string chosen = load ? _loadMacro : _unloadMacro;
         bool own = !chosen.Equals(name, StringComparison.OrdinalIgnoreCase);
         string? script = tool?.Lane != null ? tool.LaneScript(load, inUse) : _macros.Script(load, number, inUse, chosen);
+        // In bypass, the bypass loads and unloads with the printer's own macros; a lane can only be ejected.
+        bool bypass = state.Tools.Tools.Any(t => t.Bypass);
         string? why = tool?.Lane != null
-            ? (load && inUse ? "Loaded" : !tool.Filament ? "No filament" : null)
+            ? (load && bypass ? "Bypass" : load && inUse ? "Loaded" : !tool.Filament ? "No filament" : null)
             : script != null ? null
             : own || _macros.Macros.Contains(name) ? "Active toolhead only"
             : $"No {name} macro";
@@ -671,7 +673,7 @@ public partial class SpoolmanPanel : ModulePanel
                         await _source.Api.SetActiveSpoolAsync(null, _lifetime);
                 }
                 else if (!load && tool != null)
-                    await _source.Api.SetToolSpoolAsync(tool.Name, null, inUse, _lifetime);
+                    await _source.Api.SetToolSpoolAsync(tool, null, inUse, _lifetime);
                 else if (!load)
                     await _source.Api.SetActiveSpoolAsync(null, _lifetime);
                 // The tool's spool is the one Moonraker counts, if it's the tool in use.

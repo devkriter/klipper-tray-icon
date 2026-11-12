@@ -170,6 +170,12 @@ public sealed class SpoolmanSource
                 return State;
             var status = await Api.GetStatusAsync(ct).ConfigureAwait(false);
             var tools = await Api.GetToolsAsync(ct).ConfigureAwait(false);
+            // AFC in bypass: the bypass holds the active spool.
+            if (tools.Active >= 0 && tools.Tools[tools.Active].Bypass)
+                tools = tools with
+                {
+                    Tools = tools.Tools.Select((t, i) => i == tools.Active ? t with { SpoolId = status.ActiveSpoolId } : t).ToList(),
+                };
             // Several tools on one extruder (a filament changer): the one in use holds the active spool.
             if (tools.Active < 0 && tools.Tools.Count > 1 && status.ActiveSpoolId is int active)
                 tools = tools with { Active = tools.Tools.ToList().FindIndex(t => t.SpoolId == active) };

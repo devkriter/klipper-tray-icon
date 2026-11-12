@@ -58,9 +58,10 @@ public sealed record SpoolmanStatus(bool Connected, int PendingReports, int? Act
 /// <summary>
 /// A toolhead with a spool_id variable on its macro (T0, T1, …), as Mainsail and Fluidd use them; or a
 /// lane of an AFC filament changer (Box Turtle, NightOwl), named by the tool it maps to, with Lane its
-/// AFC name ("lane1") and Filament whether filament is in it.
+/// AFC name ("lane1") and Filament whether filament is in it; or, while AFC is in bypass, the bypass
+/// (Bypass), whose spool is Moonraker's active one.
 /// </summary>
-public sealed record Tool(string Name, int? SpoolId, string? Lane = null, bool Filament = true)
+public sealed record Tool(string Name, int? SpoolId, string? Lane = null, bool Filament = true, bool Bypass = false)
 {
     /// <summary>
     /// The G-code that loads a lane into the toolhead (unloading the one there first), or unloads it:
@@ -218,7 +219,7 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
         if (_lanes.Count > 0)
         {
             using var lanes = await printer.GetJsonAsync(
-                "/printer/objects/query?AFC=current_load" + string.Concat(_lanes.Select(l => $"&{Uri.EscapeDataString(l)}")),
+                "/printer/objects/query?AFC=current_load,bypass_state" + string.Concat(_lanes.Select(l => $"&{Uri.EscapeDataString(l)}")),
                 ct, TimeSpan.FromSeconds(3));
             return ReadLanes(lanes.RootElement.Prop("result").Prop("status"), _lanes);
         }
@@ -332,6 +333,12 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
             .Select(l => new Tool(l.Map.Length > 0 ? l.Map.ToUpperInvariant() : l.Lane, l.Id is double id and > 0 ? (int)id : null,
                                   l.Lane, l.Filament))
             .ToList();
+        // In bypass, the filament comes in past the lanes: the bypass is the tool in use (its spool: the active one).
+        if (status.Prop("AFC").Prop("bypass_state").ValueKind == JsonValueKind.True)
+        {
+            tools.Add(new Tool("Bypass", null, Bypass: true));
+            return new ToolSpools(tools, tools.Count - 1);
+        }
         string current = status.Prop("AFC").Str("current_load");
         return new ToolSpools(tools, tools.FindIndex(t => t.Lane == current));
     }
@@ -403,6 +410,11 @@ public sealed class SpoolmanApi(IMoonrakerApi printer)
     /// </summary>
     public async Task SetToolSpoolAsync(Tool tool, int? id, bool active, CancellationToken ct)
     {
+        if (tool.Bypass)
+        {
+            await SetActiveSpoolAsync(id, ct);
+            return;
+        }
         if (tool.Lane == null)
         {
             await SetToolSpoolAsync(tool.Name, id, active, ct);

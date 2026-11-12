@@ -268,6 +268,27 @@ public class SpoolmanTests
     }
 
     [Fact]
+    public async Task InBypassTheBypassIsInUseWithTheActiveSpool()
+    {
+        var (api, printer) = MakeTwoLanes();
+        // As the Voron printing through the bypass: both lanes empty, Moonraker counting spool 7.
+        printer.Query = """
+            {"AFC":{"current_load":null,"bypass_state":true},
+             "AFC_stepper lane1":{"name":"lane1","map":"T0","spool_id":null,"load":false},
+             "AFC_stepper lane2":{"name":"lane2","map":"T1","spool_id":null,"load":false}}
+            """;
+        var state = await new SpoolmanSource(api).GetAsync("", TimeSpan.Zero, default);
+        Assert.Equal(["T0", "T1", "Bypass"], state.Tools.Tools.Select(t => t.Name));
+        Assert.Equal(2, state.Tools.Active);
+        Assert.Equal(7, state.Tools.Tools[2].SpoolId);
+        Assert.Equal(7, state.ActiveSpool!.Id);
+        // Putting a spool in the bypass is Moonraker's active spool, nothing for AFC.
+        await api.SetToolSpoolAsync(state.Tools.Tools[2], 12, active: true, default);
+        Assert.Contains("POST /server/spoolman/spool_id {\"spool_id\":12}", printer.Requests);
+        Assert.DoesNotContain(printer.Requests, r => r.Contains("SET_SPOOL_ID"));
+    }
+
+    [Fact]
     public async Task PuttingASpoolInALaneSetsAfcsSpoolId()
     {
         var (api, printer) = MakeTwoLanes();

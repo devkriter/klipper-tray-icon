@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.17.3] - 2026-11-12
+### Fixed
+- Spoolman: with AFC in bypass, the spool in use is shown on a *Bypass* card (in use), rather than
+  nowhere. Picking a spool for it sets Moonraker's active spool; Load and Unload use the printer's own
+  macros, and the lanes can't be loaded until bypass is off.
+
 ## [2.17.2] - 2026-11-12
 ### Changed
 - Spoolman and the print queue use two columns in a wide panel (under the webcam): the spools in the

@@ -23,7 +23,7 @@ internal static class HandCursors
 
     private static Cursor Load(string file)
     {
-        var resource = Application.GetResourceStream(new Uri($"pack://application:,,,/UI/Cursors/{file}"))!;
+        var resource = Application.GetResourceStream(new Uri($"pack://application:,,,/KlipperTrayIcon;component/UI/Cursors/{file}"))!;
         using var stream = resource.Stream;
         return new Cursor(stream, scaleWithDpi: true);
     }

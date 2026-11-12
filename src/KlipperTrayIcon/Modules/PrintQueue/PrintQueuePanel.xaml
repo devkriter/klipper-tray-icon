@@ -236,6 +236,12 @@
             </DataTemplate.Triggers>
         </DataTemplate>
     </modules:ModulePanel.Resources>
+    <!-- One column, or two in a wide panel (under the webcam): the queue | recent uploads. -->
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition />
+            <ColumnDefinition x:Name="RecentColumn" Width="0" />
+        </Grid.ColumnDefinitions>
     <DockPanel>
         <Grid DockPanel.Dock="Top" Margin="12,5,10,5" MinHeight="22">
             <TextBlock x:Name="QueueHeader" Text="QUEUE" Foreground="#9A9A9A" FontSize="11" FontWeight="SemiBold"
@@ -271,4 +277,20 @@
             </StackPanel>
         </ScrollViewer>
     </DockPanel>
+        <!-- The recent uploads' heading, list and Load more move here in a wide panel. -->
+        <Border x:Name="RecentPane" Grid.Column="1" BorderBrush="#2A2A2A" BorderThickness="1,0,0,0" Visibility="Collapsed">
+            <DockPanel>
+                <ContentControl x:Name="RecentHeadHost" DockPanel.Dock="Top" Focusable="False" />
+                <ScrollViewer x:Name="RecentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalOnly">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
+                    </ScrollViewer.Resources>
+                    <StackPanel x:Name="RecentStack" Margin="6,0,8,8" />
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+        <!-- A recent upload being dragged across to the queue, drawn over both columns. -->
+        <Canvas x:Name="DragLayer" Grid.ColumnSpan="2" IsHitTestVisible="False" />
+    </Grid>
 </modules:ModulePanel>

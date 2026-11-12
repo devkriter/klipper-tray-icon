@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.17.2] - 2026-11-12
+### Changed
+- Spoolman and the print queue use two columns in a wide panel (under the webcam): the spools in the
+  printer beside the other spools, and the queue beside the recent uploads, which are dragged across into it.
+
 ## [2.17.1] - 2026-11-12
 ### Changed
 - AFC: when the page is too low for the drawing top to bottom (the panel under the webcam), it's drawn

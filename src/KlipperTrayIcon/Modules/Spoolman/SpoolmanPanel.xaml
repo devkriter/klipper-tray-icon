@@ -231,14 +231,19 @@
             </DataTemplate.Triggers>
         </DataTemplate>
     </modules:ModulePanel.Resources>
-    <DockPanel>
+    <!-- One column, or two in a wide panel (under the webcam): the spools in the printer | the others. -->
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition />
+            <ColumnDefinition x:Name="OthersColumn" Width="0" />
+        </Grid.ColumnDefinitions>
         <!-- The spools in the printer and the others scroll together: with several toolheads the cards fill the page. -->
         <ScrollViewer x:Name="PageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                       PanningMode="VerticalOnly">
             <ScrollViewer.Resources>
                 <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
             </ScrollViewer.Resources>
-            <StackPanel RequestBringIntoView="OnBringIntoView">
+            <StackPanel x:Name="MainStack" RequestBringIntoView="OnBringIntoView">
                 <!-- Spoolman or the printer isn't answering. -->
                 <Border x:Name="Banner" Background="#3A2F12" CornerRadius="5" Margin="10,10,10,0" Padding="10,7"
                         Visibility="Collapsed">
@@ -258,8 +263,9 @@
                 <StackPanel x:Name="Cards" Margin="10,0" />
 
                 <!-- OTHER SPOOLS · N, with a magnifier on its left that opens a filter on the same line, and
-                     Open Spoolman on the right. -->
-                <Grid Margin="8,10,10,4" Height="24">
+                     Open Spoolman on the right; moved to the second column in a wide panel. -->
+                <StackPanel x:Name="Others">
+                <Grid x:Name="OthersHead" Margin="8,10,10,4" Height="24">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition />
@@ -286,7 +292,17 @@
                 <TextBlock x:Name="ListNote" Foreground="#8C8C8C" FontSize="12" FontStyle="Italic"
                            TextWrapping="Wrap" Margin="14,2,14,4" Visibility="Collapsed" />
                 <ItemsControl x:Name="SpoolList" ItemTemplate="{StaticResource SpoolRow}" Margin="0,0,0,6" />
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
-    </DockPanel>
+        <Border x:Name="OthersPane" Grid.Column="1" BorderBrush="#2A2A2A" BorderThickness="1,0,0,0" Visibility="Collapsed">
+            <ScrollViewer x:Name="OthersScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          PanningMode="VerticalOnly">
+                <ScrollViewer.Resources>
+                    <Style TargetType="ScrollBar" BasedOn="{StaticResource SubtleScrollBar}" />
+                </ScrollViewer.Resources>
+                <ContentControl x:Name="OthersHost" Focusable="False" RequestBringIntoView="OnBringIntoView" />
+            </ScrollViewer>
+        </Border>
+    </Grid>
 </modules:ModulePanel>

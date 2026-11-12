@@ -68,6 +68,7 @@ public partial class SpoolmanPanel : ModulePanel
     public SpoolmanPanel(SpoolmanSource source, ModuleContext context)
     {
         InitializeComponent();
+        SizeChanged += (_, _) => Fit();
         _source = source;
         _printer = context.Printer;
         _lifetime = context.Lifetime;
@@ -719,6 +720,31 @@ public partial class SpoolmanPanel : ModulePanel
             ActionNote.Visibility = Visibility.Collapsed;
         };
         _noteFade.Start();
+    }
+
+    // Two columns: the panel is wide (under the webcam), so the other spools go beside the ones in the printer.
+    private bool _twoColumns;
+
+    private void Fit()
+    {
+        bool two = Layout.TwoColumns(this);
+        if (two == _twoColumns)
+            return;
+        _twoColumns = two;
+        if (two)
+        {
+            MainStack.Children.Remove(Others);
+            OthersHost.Content = Others;
+            OthersHead.Margin = new Thickness(8, 5, 10, 4);
+        }
+        else
+        {
+            OthersHost.Content = null;
+            MainStack.Children.Add(Others);
+            OthersHead.Margin = new Thickness(8, 10, 10, 4);
+        }
+        OthersColumn.Width = two ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        OthersPane.Visibility = two ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>

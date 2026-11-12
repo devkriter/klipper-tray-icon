@@ -52,6 +52,11 @@ public partial class PrintQueuePanel : ModulePanel
     private QueueRow? _pressRow;
     private FrameworkElement? _pressElement;
     private Point _pressPoint;
+    // Two columns (a wide panel): the recent uploads on the right. One dragged across is drawn as a
+    // picture of it (the ghost) over both columns, from where it was (relative to the mouse, on DragLayer).
+    private bool _twoColumns;
+    private System.Windows.Shapes.Rectangle? _ghost;
+    private Point _ghostFrom, _pressLayer;
     private QueueRow? _dragRow;
     private FrameworkElement? _dragContainer;
     private bool _dragFromQueue;
@@ -60,6 +65,7 @@ public partial class PrintQueuePanel : ModulePanel
     public PrintQueuePanel(PrintQueueApi queue, ModuleContext context)
     {
         InitializeComponent();
+        SizeChanged += (_, _) => Fit();
         _queue = queue;
         _printer = context.Printer;
         _lifetime = context.Lifetime;
@@ -413,6 +419,43 @@ public partial class PrintQueuePanel : ModulePanel
         }
     }
 
+    // ---- one column or two ------------------------------------------------------------------
+
+    /// <summary>
+    /// In a wide panel (under the webcam), the recent uploads go in a second column beside the queue;
+    /// otherwise under it. Not while a row is being dragged.
+    /// </summary>
+    private void Fit()
+    {
+        bool two = Layout.TwoColumns(this);
+        if (two == _twoColumns || _dragRow != null)
+            return;
+        _twoColumns = two;
+        if (two)
+        {
+            BelowQueue.Children.Remove(RecentHeading);
+            BelowQueue.Children.Remove(RecentList);
+            BelowQueue.Children.Remove(LoadMoreButton);
+            RecentHeadHost.Content = RecentHeading;
+            RecentHeading.Margin = new Thickness(12, 9, 10, 9);
+            RecentStack.Children.Add(RecentList);
+            RecentStack.Children.Add(LoadMoreButton);
+            QueueEmpty.Text = "Nothing queued. Add a file from the recent uploads.";
+        }
+        else
+        {
+            RecentHeadHost.Content = null;
+            RecentStack.Children.Clear();
+            RecentHeading.Margin = new Thickness(6, 14, 6, 6);
+            BelowQueue.Children.Add(RecentHeading);
+            BelowQueue.Children.Add(RecentList);
+            BelowQueue.Children.Add(LoadMoreButton);
+            QueueEmpty.Text = "Nothing queued. Add a file from the recent uploads below.";
+        }
+        RecentColumn.Width = two ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        RecentPane.Visibility = two ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // ---- dragging: queued jobs to reorder them, recent uploads into the queue -------------
 
 
@@ -420,7 +463,7 @@ public partial class PrintQueuePanel : ModulePanel
     {
         // Buttons in the row (✕, ＋) take their own clicks before this sees them.
         if (sender is FrameworkElement { DataContext: QueueRow row } element)
-            (_pressRow, _pressElement, _pressPoint) = (row, element, e.GetPosition(QueueContent));
+            (_pressRow, _pressElement, _pressPoint, _pressLayer) = (row, element, e.GetPosition(QueueContent), e.GetPosition(DragLayer));
     }
 
     private void OnRowMouseMove(object sender, MouseEventArgs e)
@@ -442,10 +485,16 @@ public partial class PrintQueuePanel : ModulePanel
         else if (y > QueueScroll.ActualHeight - 24)
             QueueScroll.ScrollToVerticalOffset(QueueScroll.VerticalOffset + 8);
         at = e.GetPosition(QueueContent);
-        _dropIndex = DropIndex(at.Y);
+        _dropIndex = DropIndex(at);
         OpenGap();
+        if (_ghost != null)
+        {
+            var mouse = e.GetPosition(DragLayer);
+            Canvas.SetLeft(_ghost, _ghostFrom.X + mouse.X - _pressLayer.X);
+            Canvas.SetTop(_ghost, _ghostFrom.Y + mouse.Y - _pressLayer.Y);
+        }
         // The row follows the mouse (a recent upload's list may have moved down to make room).
-        if (_dragContainer?.RenderTransform is TranslateTransform move)
+        else if (_dragContainer?.RenderTransform is TranslateTransform move)
             move.Y = at.Y - _pressPoint.Y - (_dragFromQueue ? 0 : BelowQueueShift.Y);
     }
 
@@ -457,7 +506,26 @@ public partial class PrintQueuePanel : ModulePanel
         _dragFromQueue = _queueRows.Contains(_dragRow!);
         var list = _dragFromQueue ? QueueList : RecentList;
         _dragContainer = list.ItemContainerGenerator.ContainerFromItem(_dragRow!) as FrameworkElement;
-        if (_dragContainer != null)
+        if (_dragContainer != null && _twoColumns && !_dragFromQueue)
+        {
+            // Across to the other column: a picture of the row moves, the row stays (dimmed).
+            var row = _dragContainer;
+            var dpi = VisualTreeHelper.GetDpi(row);
+            var picture = new RenderTargetBitmap((int)Math.Ceiling(row.ActualWidth * dpi.DpiScaleX),
+                                                 (int)Math.Ceiling(row.ActualHeight * dpi.DpiScaleY),
+                                                 dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+            picture.Render(row);
+            _ghost = new System.Windows.Shapes.Rectangle
+            {
+                Width = row.ActualWidth, Height = row.ActualHeight, Fill = new ImageBrush(picture), Opacity = 0.9,
+            };
+            _ghostFrom = row.TranslatePoint(new Point(0, 0), DragLayer);
+            Canvas.SetLeft(_ghost, _ghostFrom.X);
+            Canvas.SetTop(_ghost, _ghostFrom.Y);
+            DragLayer.Children.Add(_ghost);
+            row.Opacity = 0.4;
+        }
+        else if (_dragContainer != null)
         {
             _dragContainer.RenderTransform = new TranslateTransform();
             Panel.SetZIndex(_dragContainer, 1);
@@ -486,11 +554,22 @@ public partial class PrintQueuePanel : ModulePanel
     }
 
     /// <summary>Where the dragged row would land: before the first queued row whose middle is below the mouse.</summary>
-    private int DropIndex(double y)
+    private int DropIndex(Point at)
     {
-        // A recent upload only goes in when it's over the queue (above the recent uploads' heading).
-        if (!_dragFromQueue && y > RecentHeading.TranslatePoint(new Point(0, 0), QueueContent).Y + RecentHeading.ActualHeight)
-            return -1;
+        double y = at.Y;
+        // A recent upload only goes in when it's over the queue: above the recent uploads' heading, or
+        // in two columns, over the queue's.
+        if (!_dragFromQueue)
+        {
+            if (_twoColumns)
+            {
+                double x = QueueContent.TranslatePoint(at, QueueScroll).X;
+                if (x < 0 || x > QueueScroll.ActualWidth)
+                    return -1;
+            }
+            else if (y > RecentHeading.TranslatePoint(new Point(0, 0), QueueContent).Y + RecentHeading.ActualHeight)
+                return -1;
+        }
         var others = OtherQueueRows();
         int index = others.Count(r => (r.Top + r.Bottom) / 2 < y);
         // Dropping a queued job back where it was changes nothing.
@@ -514,7 +593,7 @@ public partial class PrintQueuePanel : ModulePanel
             double shift = (from >= 0 && i >= from ? -height : 0) + (to >= 0 && i >= to ? height : 0);
             Slide(others[i].Container, shift);
         }
-        if (!_dragFromQueue)
+        if (!_dragFromQueue && !_twoColumns)
             BelowQueueShift.Y = _dropIndex >= 0 ? height : 0;
     }
 
@@ -559,6 +638,8 @@ public partial class PrintQueuePanel : ModulePanel
         foreach (var other in OtherQueueRows())
             (other.Container.RenderTransform, other.Container.Tag) = (Transform.Identity, null);
         BelowQueueShift.Y = 0;
+        DragLayer.Children.Clear();
+        _ghost = null;
         (_dragRow, _dragContainer, _pressRow, _dropIndex) = (null, null, null, -1);
         Mouse.OverrideCursor = null;
         _pressElement?.ReleaseMouseCapture();

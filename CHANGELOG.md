@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.17.4] - 2026-11-18
+### Fixed
+- Selecting text in the console works with the *Console commands* module on: its check for clicks outside
+  its dropdown failed on the console's text and cancelled the click.
+
 ## [2.17.3] - 2026-11-12
 ### Fixed
 - Spoolman: with AFC in bypass, the spool in use is shown on a *Bypass* card (in use), rather than

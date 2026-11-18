@@ -93,7 +93,11 @@ public partial class CommandBox : ModuleConsoleInput
             if (Window.GetWindow(this) is { } window)
                 window.PreviewMouseDown += (_, e) =>
                 {
-                    if (e.OriginalSource is DependencyObject d && !IsAncestorOf(d))
+                    // Text in a document (the console's lines) isn't a Visual: its control is what was clicked.
+                    var d = e.OriginalSource as DependencyObject;
+                    while (d is not null and not Visual and not System.Windows.Media.Media3D.Visual3D)
+                        d = LogicalTreeHelper.GetParent(d);
+                    if (d != null && !IsAncestorOf(d))
                         Close();
                 };
         };

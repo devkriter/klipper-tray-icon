@@ -221,7 +221,15 @@
                                      Background="Transparent" BorderThickness="0" Padding="0" Foreground="#ECECEC"
                                      SelectionBrush="#60CDFF" SelectionOpacity="0.35" CaretBrush="Transparent"
                                      VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"
-                                     FocusVisualStyle="{x:Null}" />
+                                     FocusVisualStyle="{x:Null}">
+                            <!-- Just the text: the theme's text box draws an accent underline while it has focus. -->
+                            <RichTextBox.Template>
+                                <ControlTemplate TargetType="RichTextBox">
+                                    <ScrollViewer x:Name="PART_ContentHost" Focusable="False" Padding="{TemplateBinding Padding}"
+                                                  VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" />
+                                </ControlTemplate>
+                            </RichTextBox.Template>
+                        </RichTextBox>
                     </ScrollViewer>
                     </DockPanel>
 

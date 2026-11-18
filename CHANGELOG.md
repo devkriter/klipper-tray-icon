@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.17.5] - 2026-11-18
+### Fixed
+- The console no longer draws a blue line under its last line after a click in it.
+
 ## [2.17.4] - 2026-11-18
 ### Fixed
 - Selecting text in the console works with the *Console commands* module on: its check for clicks outside
